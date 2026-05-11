@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Geometry Visualizer</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background-color: #f5f7fa; 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        #app { width: 100vw; height: 100vh; }
+        
+        /* Tweakpane Light Theme Overrides */
+        :root {
+            --tp-base-background-color: rgba(255, 255, 255, 0.8);
+            --tp-base-shadow-color: rgba(0, 0, 0, 0.05);
+            --tp-button-background-color: rgba(0, 0, 0, 0.05);
+            --tp-button-background-color-active: rgba(0, 0, 0, 0.15);
+            --tp-button-background-color-focus: rgba(0, 0, 0, 0.1);
+            --tp-button-background-color-hover: rgba(0, 0, 0, 0.08);
+            --tp-button-foreground-color: #111;
+            --tp-container-background-color: rgba(255, 255, 255, 0.5);
+            --tp-container-background-color-active: rgba(255, 255, 255, 0.7);
+            --tp-container-background-color-focus: rgba(255, 255, 255, 0.6);
+            --tp-container-background-color-hover: rgba(255, 255, 255, 0.55);
+            --tp-container-foreground-color: #333;
+            --tp-input-background-color: rgba(0, 0, 0, 0.03);
+            --tp-input-background-color-active: rgba(0, 0, 0, 0.08);
+            --tp-input-background-color-focus: rgba(0, 0, 0, 0.05);
+            --tp-input-background-color-hover: rgba(0, 0, 0, 0.04);
+            --tp-input-foreground-color: #111;
+            --tp-label-foreground-color: #555;
+            --tp-monitor-background-color: rgba(0, 0, 0, 0.03);
+            --tp-monitor-foreground-color: #777;
+        }
+
+        .tp-dfwv {
+            backdrop-filter: blur(10px);
+            border-radius: 8px;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+            margin: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+</body>
+</html>

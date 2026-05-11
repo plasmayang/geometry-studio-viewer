@@ -1,0 +1,25 @@
+{
+  "version": "1.0",
+  "kernelInfo": {
+    "algorithm": "Round Ball Offset (RBO) with Singularity Trimming",
+    "calcTimeMs": 15.4,
+    "status": "success"
+  },
+  "geometry": {
+    "type": "TriangularMesh",
+    "mesh": {
+      "vertices": [
+        0.0, 0.0, 0.0,   1.0, 0.0, 0.0,   0.0, 1.0, 0.0,
+        1.0, 0.0, 0.0,   1.0, 1.0, 0.0,   0.0, 1.0, 0.0
+      ], 
+      "normals": [
+        0.0, 0.0, 1.0,   0.0, 0.0, 1.0,   0.0, 0.0, 1.0,
+        0.0, 0.0, 1.0,   0.0, 0.0, 1.0,   0.0, 0.0, 1.0
+      ],
+      "indices": [0, 1, 2, 3, 4, 5]
+    },
+    "debugMarkers": {
+      "singularities": [0.5, 0.5, 0.0] 
+    }
+  }
+}
