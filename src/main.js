@@ -32,8 +32,8 @@ class App {
             const jsonData = await response.json();
             console.log('Kernel Info:', jsonData.kernelInfo);
             
-            const geometry = GeometryParser.parseMesh(jsonData);
-            this.viewer.loadMesh(geometry);
+            const { geometry, markers, nurbs } = GeometryParser.parseMesh(jsonData);
+            this.viewer.loadMesh(geometry, markers, nurbs);
         } catch (error) {
             console.error('Error loading data:', error);
         }

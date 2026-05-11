@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { VertexNormalsHelper } from 'three/addons/helpers/VertexNormalsHelper.js';
+import { NURBSCurve } from 'three/addons/curves/NURBSCurve.js';
+import { NURBSSurface } from 'three/addons/curves/NURBSSurface.js';
+import { ParametricGeometry } from 'three/addons/geometries/ParametricGeometry.js';
 
 export class Viewer3D {
     constructor() {
@@ -11,6 +14,11 @@ export class Viewer3D {
         this.mesh = null;
         this.normalsHelper = null;
         this.grid = null;
+        this.markersGroup = new THREE.Group();
+        this.nurbsGroup = new THREE.Group();
+        
+        this.scene.add(this.markersGroup);
+        this.scene.add(this.nurbsGroup);
         
         this.material = new THREE.MeshPhongMaterial({
             color: 0x4488ff,
@@ -67,21 +75,38 @@ export class Viewer3D {
         this.renderer.render(this.scene, this.camera);
     }
 
-    loadMesh(geometry) {
+    loadMesh(geometry, markers = [], nurbs = null) {
         if (this.mesh) {
             this.scene.remove(this.mesh);
             if (this.normalsHelper) this.scene.remove(this.normalsHelper);
             this.mesh.geometry.dispose();
         }
+        
+        // Clear groups
+        [this.markersGroup, this.nurbsGroup].forEach(group => {
+            while(group.children.length > 0) {
+                const child = group.children[0];
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) child.material.dispose();
+                group.remove(child);
+            }
+        });
 
         this.mesh = new THREE.Mesh(geometry, this.material);
         this.scene.add(this.mesh);
+
+        this.addMarkers(markers);
+        if (nurbs) this.addNurbs(nurbs);
 
         // Auto-center and zoom
         geometry.computeBoundingBox();
         const center = new THREE.Vector3();
         geometry.boundingBox.getCenter(center);
         this.mesh.position.copy(center).multiplyScalar(-1);
+
+        // Also adjust groups
+        this.markersGroup.position.copy(this.mesh.position);
+        this.nurbsGroup.position.copy(this.mesh.position);
 
         const size = new THREE.Vector3();
         geometry.boundingBox.getSize(size);
@@ -94,9 +119,73 @@ export class Viewer3D {
         this.camera.lookAt(0, 0, 0);
         if (this.controls) this.controls.target.set(0, 0, 0);
 
-        // Refresh normals helper if it was active
         if (this.params && this.params.showNormals) {
             this.showNormals(true);
+        }
+    }
+
+    addMarkers(markers) {
+        const sphereGeom = new THREE.SphereGeometry(0.05, 16, 16);
+        const singularityMat = new THREE.MeshBasicMaterial({ color: 0xff3366 });
+
+        markers.forEach(marker => {
+            if (marker.type === 'singularity') {
+                const sphere = new THREE.Mesh(sphereGeom, singularityMat);
+                sphere.position.set(...marker.position);
+                this.markersGroup.add(sphere);
+            }
+        });
+    }
+
+    addNurbs(nurbsData) {
+        // --- NURBS Curves ---
+        if (nurbsData.curves) {
+            nurbsData.curves.forEach(data => {
+                const cps = [];
+                for (let i = 0; i < data.controlPoints.length; i += 3) {
+                    cps.push(new THREE.Vector4(data.controlPoints[i], data.controlPoints[i+1], data.controlPoints[i+2], 1));
+                }
+                const curve = new NURBSCurve(data.degree, data.knots, cps);
+                const geometry = new THREE.BufferGeometry().setFromPoints(curve.getPoints(100));
+                const material = new THREE.LineBasicMaterial({ color: 0xffaa00, linewidth: 2 });
+                this.nurbsGroup.add(new THREE.Line(geometry, material));
+
+                // Control Hull
+                const hullGeom = new THREE.BufferGeometry().setFromPoints(cps.map(p => new THREE.Vector3(p.x, p.y, p.z)));
+                const hullMat = new THREE.LineDashedMaterial({ color: 0x999999, dashSize: 0.1, gapSize: 0.1 });
+                const hull = new THREE.Line(hullGeom, hullMat);
+                hull.computeLineDistances();
+                this.nurbsGroup.add(hull);
+            });
+        }
+
+        // --- NURBS Surfaces ---
+        if (nurbsData.surfaces) {
+            nurbsData.surfaces.forEach(data => {
+                const ns = data.knotsU.length - data.degreeU - 1;
+                const ms = data.knotsV.length - data.degreeV - 1;
+                const controlPoints = [];
+                for (let i = 0; i <= ns; i++) {
+                    controlPoints[i] = [];
+                    for (let j = 0; j <= ms; j++) {
+                        const idx = (i * (ms + 1) + j) * 3;
+                        controlPoints[i][j] = new THREE.Vector4(
+                            data.controlPoints[idx], 
+                            data.controlPoints[idx+1], 
+                            data.controlPoints[idx+2], 
+                            1
+                        );
+                    }
+                }
+
+                const surface = new NURBSSurface(data.degreeU, data.degreeV, data.knotsU, data.knotsV, controlPoints);
+                const getSurfacePoint = (u, v, target) => {
+                    surface.getPoint(u, v, target);
+                };
+                const geometry = new ParametricGeometry(getSurfacePoint, 32, 32);
+                const material = new THREE.MeshPhongMaterial({ color: 0xffaa00, side: THREE.DoubleSide, transparent: true, opacity: 0.5 });
+                this.nurbsGroup.add(new THREE.Mesh(geometry, material));
+            });
         }
     }
 
