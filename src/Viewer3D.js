@@ -54,11 +54,21 @@ export class Viewer3D {
 
         // --- Helpers ---
         this.grid = new THREE.GridHelper(20, 20, 0xbbbbbb, 0xdddddd);
-        this.grid.rotation.x = Math.PI / 2;
+        this.grid.rotation.x = Math.PI / 2; // XY Plane
         this.scene.add(this.grid);
 
+        // Add a second grid for XZ Plane
+        this.gridXZ = new THREE.GridHelper(20, 20, 0xcccccc, 0xeeeeee);
+        this.scene.add(this.gridXZ);
+
+        this.axesHelper = new THREE.AxesHelper(5);
+        this.scene.add(this.axesHelper);
+
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-        this.camera.position.set(0, 0, 5);
+        this.controls.enableDamping = true;
+        this.controls.dampingFactor = 0.05;
+        this.camera.position.set(5, 5, 10);
+        this.controls.update();
 
         window.addEventListener('resize', () => {
             this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -98,30 +108,22 @@ export class Viewer3D {
         this.addMarkers(markers);
         if (nurbs) this.addNurbs(nurbs);
 
-        // Auto-center and zoom
-        geometry.computeBoundingBox();
-        const center = new THREE.Vector3();
-        geometry.boundingBox.getCenter(center);
-        this.mesh.position.copy(center).multiplyScalar(-1);
+        // Auto-center and zoom (only if mesh exists)
+        if (geometry.attributes.position.count > 0) {
+            geometry.computeBoundingBox();
+            const center = new THREE.Vector3();
+            geometry.boundingBox.getCenter(center);
+            this.mesh.position.copy(center).multiplyScalar(-1);
 
-        // Also adjust groups
-        this.markersGroup.position.copy(this.mesh.position);
-        this.nurbsGroup.position.copy(this.mesh.position);
-
-        const size = new THREE.Vector3();
-        geometry.boundingBox.getSize(size);
-        const maxDim = Math.max(size.x, size.y, size.z);
-        const fov = this.camera.fov * (Math.PI / 180);
-        let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
-        cameraZ *= 2.0; // Comfort zoom
-
-        this.camera.position.set(0, 0, cameraZ);
-        this.camera.lookAt(0, 0, 0);
-        if (this.controls) this.controls.target.set(0, 0, 0);
-
-        if (this.params && this.params.showNormals) {
-            this.showNormals(true);
+            // Also adjust groups
+            this.markersGroup.position.copy(this.mesh.position);
+            this.nurbsGroup.position.copy(this.mesh.position);
         }
+
+        // Removed the hard-coded camera reset to allow persistent OrbitControls state
+        // if (this.params && this.params.showNormals) {
+        //     this.showNormals(true);
+        // }
     }
 
     addMarkers(markers) {
@@ -140,22 +142,44 @@ export class Viewer3D {
     addNurbs(nurbsData) {
         // --- NURBS Curves ---
         if (nurbsData.curves) {
-            nurbsData.curves.forEach(data => {
+            nurbsData.curves.forEach((data, index) => {
                 const cps = [];
                 for (let i = 0; i < data.controlPoints.length; i += 3) {
                     cps.push(new THREE.Vector4(data.controlPoints[i], data.controlPoints[i+1], data.controlPoints[i+2], 1));
                 }
                 const curve = new NURBSCurve(data.degree, data.knots, cps);
                 const geometry = new THREE.BufferGeometry().setFromPoints(curve.getPoints(100));
-                const material = new THREE.LineBasicMaterial({ color: 0xffaa00, linewidth: 2 });
-                this.nurbsGroup.add(new THREE.Line(geometry, material));
+                
+                // Color Logic:
+                // 0: Spine (Red)
+                // 1-3: Sections (Blue)
+                // 4+: Guides (Gray/Green)
+                let color = 0x000000;
+                let linewidth = 2;
 
-                // Control Hull
-                const hullGeom = new THREE.BufferGeometry().setFromPoints(cps.map(p => new THREE.Vector3(p.x, p.y, p.z)));
-                const hullMat = new THREE.LineDashedMaterial({ color: 0x999999, dashSize: 0.1, gapSize: 0.1 });
-                const hull = new THREE.Line(hullGeom, hullMat);
-                hull.computeLineDistances();
-                this.nurbsGroup.add(hull);
+                if (index === 0) {
+                    color = 0xff3333; // Spine: Red
+                    linewidth = 4;
+                } else if (index >= 1 && index <= 3) {
+                    color = 0x3366ff; // Sections: Blue
+                    linewidth = 3;
+                } else {
+                    color = 0x33cc33; // Guides: Green
+                    linewidth = 1;
+                }
+
+                const material = new THREE.LineBasicMaterial({ color: color, linewidth: linewidth });
+                const line = new THREE.Line(geometry, material);
+                this.nurbsGroup.add(line);
+
+                // Optional: Show control points for spine/sections
+                if (index <= 3) {
+                    const hullGeom = new THREE.BufferGeometry().setFromPoints(cps.map(p => new THREE.Vector3(p.x, p.y, p.z)));
+                    const hullMat = new THREE.LineDashedMaterial({ color: 0x999999, dashSize: 0.1, gapSize: 0.1 });
+                    const hull = new THREE.Line(hullGeom, hullMat);
+                    hull.computeLineDistances();
+                    this.nurbsGroup.add(hull);
+                }
             });
         }
 
@@ -205,6 +229,8 @@ export class Viewer3D {
 
     setGrid(enabled) {
         if (this.grid) this.grid.visible = enabled;
+        if (this.gridXZ) this.gridXZ.visible = enabled;
+        if (this.axesHelper) this.axesHelper.visible = enabled;
     }
 
     setMeshColor(color) {
