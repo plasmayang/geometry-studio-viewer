@@ -162,13 +162,17 @@ export class Viewer3D {
         // --- NURBS Surfaces ---
         if (nurbsData.surfaces) {
             nurbsData.surfaces.forEach(data => {
-                const ns = data.knotsU.length - data.degreeU - 1;
-                const ms = data.knotsV.length - data.degreeV - 1;
+                const numU = data.knotsU.length - data.degreeU - 1;
+                const numV = data.knotsV.length - data.degreeV - 1;
                 const controlPoints = [];
-                for (let i = 0; i <= ns; i++) {
+                
+                for (let i = 0; i < numU; i++) {
                     controlPoints[i] = [];
-                    for (let j = 0; j <= ms; j++) {
-                        const idx = (i * (ms + 1) + j) * 3;
+                    for (let j = 0; j < numV; j++) {
+                        // The kernel exports in Row-Major (V then U)
+                        // idx = (v * numU + u) * 3
+                        // Here i is u, j is v
+                        const idx = (j * numU + i) * 3;
                         controlPoints[i][j] = new THREE.Vector4(
                             data.controlPoints[idx], 
                             data.controlPoints[idx+1], 
@@ -183,7 +187,13 @@ export class Viewer3D {
                     surface.getPoint(u, v, target);
                 };
                 const geometry = new ParametricGeometry(getSurfacePoint, 32, 32);
-                const material = new THREE.MeshPhongMaterial({ color: 0xffaa00, side: THREE.DoubleSide, transparent: true, opacity: 0.5 });
+                const material = new THREE.MeshPhongMaterial({ 
+                    color: 0xffaa00, 
+                    side: THREE.DoubleSide, 
+                    transparent: true, 
+                    opacity: 0.8,
+                    shininess: 50
+                });
                 this.nurbsGroup.add(new THREE.Mesh(geometry, material));
             });
         }

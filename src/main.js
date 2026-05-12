@@ -26,7 +26,7 @@ class App {
     async loadData() {
         try {
             // Using absolute path for Vite
-            const response = await fetch('/src/mock/rbo_test_case.json');
+            const response = await fetch('/src/mock/loft_output.json');
             if (!response.ok) throw new Error('Failed to fetch mock data');
             
             const jsonData = await response.json();
