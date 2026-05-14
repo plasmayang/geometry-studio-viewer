@@ -3,6 +3,7 @@
   "caseName": "Case 19",
   "geometry": {
     "type": "NURBS_Collection",
+    "mesh": { "vertices": [], "indices": [] },
     "nurbs": {
       "curves": [
         {

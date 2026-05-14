@@ -7,22 +7,24 @@ export class GeometryParser {
      * @returns {THREE.BufferGeometry}
      */
     static parseMesh(jsonData) {
+        let geometry = new THREE.BufferGeometry();
         const meshData = jsonData.geometry.mesh;
-        const geometry = new THREE.BufferGeometry();
 
-        const vertices = new Float32Array(meshData.vertices);
-        const indices = new Uint16Array(meshData.indices);
+        if (meshData && meshData.vertices && meshData.vertices.length > 0) {
+            const vertices = new Float32Array(meshData.vertices);
+            const indices = new Uint16Array(meshData.indices);
 
-        geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-        
-        if (meshData.normals && meshData.normals.length > 0) {
-            const normals = new Float32Array(meshData.normals);
-            geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
-        } else {
-            geometry.computeVertexNormals();
+            geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+            
+            if (meshData.normals && meshData.normals.length > 0) {
+                const normals = new Float32Array(meshData.normals);
+                geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+            } else {
+                geometry.computeVertexNormals();
+            }
+
+            geometry.setIndex(new THREE.BufferAttribute(indices, 1));
         }
-
-        geometry.setIndex(new THREE.BufferAttribute(indices, 1));
 
         // Parse Markers
         const markers = [];
