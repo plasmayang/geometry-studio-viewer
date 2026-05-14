@@ -6,7 +6,7 @@ class App {
     constructor() {
         this.viewer = new Viewer3D();
         this.ui = null;
-        this.currentCase = 'case1.json';
+        this.currentCase = 'cases100/case1.json';
     }
 
     async init() {

@@ -8,7 +8,7 @@ export class UIController {
         });
 
         this.params = {
-            case: 'case1.json',
+            case: 'cases100/case1.json',
             wireframe: false,
             showNormals: false,
             grid: true,
@@ -20,23 +20,17 @@ export class UIController {
 
     init(callbacks) {
         const scenarioFolder = this.pane.addFolder({
-            title: 'Scenarios',
+            title: 'Scenarios (100 Cases)',
         });
 
+        const caseOptions = {};
+        for (let i = 1; i <= 100; i++) {
+            caseOptions[`Case ${i}`] = `cases100/case${i}.json`;
+        }
+
         scenarioFolder.addBinding(this.params, 'case', {
-            label: 'Test Case',
-            options: {
-                '1. Square Column': 'case1.json',
-                '2. Square Twist 45': 'case2.json',
-                '3. Scaling Up': 'case3.json',
-                '4. Barrel': 'case4.json',
-                '5. Hourglass': 'case5.json',
-                '6. Progressive Twist': 'case6.json',
-                '7. Linear Shift': 'case7.json',
-                '8. Twist & Scale': 'case8.json',
-                '9. S-Curve': 'case9.json',
-                '10. Tapered Twist': 'case10.json',
-            }
+            label: 'Select Case',
+            options: caseOptions
         }).on('change', (ev) => callbacks.onCaseChange(ev.value));
 
         const displayFolder = this.pane.addFolder({
