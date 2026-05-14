@@ -186,39 +186,47 @@ export class Viewer3D {
         // --- NURBS Surfaces ---
         if (nurbsData.surfaces) {
             nurbsData.surfaces.forEach(data => {
-                const numU = data.knotsU.length - data.degreeU - 1;
-                const numV = data.knotsV.length - data.degreeV - 1;
-                const controlPoints = [];
-                
-                for (let i = 0; i < numU; i++) {
-                    controlPoints[i] = [];
-                    for (let j = 0; j < numV; j++) {
-                        // The kernel exports in Row-Major (V then U)
-                        // idx = (v * numU + u) * 3
-                        // Here i is u, j is v
-                        const idx = (j * numU + i) * 3;
-                        controlPoints[i][j] = new THREE.Vector4(
-                            data.controlPoints[idx], 
-                            data.controlPoints[idx+1], 
-                            data.controlPoints[idx+2], 
-                            1
-                        );
+                try {
+                    const numU = data.knotsU.length - data.degreeU - 1;
+                    const numV = data.knotsV.length - data.degreeV - 1;
+                    const controlPoints = [];
+                    
+                    // Validate data size
+                    const expectedTotal = numU * numV * 3;
+                    if (data.controlPoints.length < expectedTotal) {
+                        console.warn(`Surface data mismatch: expected ${expectedTotal}, got ${data.controlPoints.length}`);
+                        return;
                     }
-                }
 
-                const surface = new NURBSSurface(data.degreeU, data.degreeV, data.knotsU, data.knotsV, controlPoints);
-                const getSurfacePoint = (u, v, target) => {
-                    surface.getPoint(u, v, target);
-                };
-                const geometry = new ParametricGeometry(getSurfacePoint, 32, 32);
-                const material = new THREE.MeshPhongMaterial({ 
-                    color: 0xffaa00, 
-                    side: THREE.DoubleSide, 
-                    transparent: true, 
-                    opacity: 0.8,
-                    shininess: 50
-                });
-                this.nurbsGroup.add(new THREE.Mesh(geometry, material));
+                    for (let i = 0; i < numU; i++) {
+                        controlPoints[i] = [];
+                        for (let j = 0; j < numV; j++) {
+                            const idx = (j * numU + i) * 3;
+                            controlPoints[i][j] = new THREE.Vector4(
+                                data.controlPoints[idx], 
+                                data.controlPoints[idx+1], 
+                                data.controlPoints[idx+2], 
+                                1
+                            );
+                        }
+                    }
+
+                    const surface = new NURBSSurface(data.degreeU, data.degreeV, data.knotsU, data.knotsV, controlPoints);
+                    const getSurfacePoint = (u, v, target) => {
+                        surface.getPoint(u, v, target);
+                    };
+                    const geometry = new ParametricGeometry(getSurfacePoint, 32, 32);
+                    const material = new THREE.MeshPhongMaterial({ 
+                        color: 0xffaa00, 
+                        side: THREE.DoubleSide, 
+                        transparent: true, 
+                        opacity: 0.8,
+                        shininess: 50
+                    });
+                    this.nurbsGroup.add(new THREE.Mesh(geometry, material));
+                } catch (e) {
+                    console.error("Error rendering NURBS surface:", e);
+                }
             });
         }
     }

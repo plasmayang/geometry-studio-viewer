@@ -3,9 +3,7 @@
   "caseName": "Auto Case 34",
   "geometry": {
     "type": "NURBSSurface",
-    "mesh": {
-      "vertices": [], "indices": []
-    },
+    "mesh": { "vertices": [], "indices": [] },
     "nurbs": {
       "curves": [
         {
