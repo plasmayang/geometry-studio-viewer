@@ -172,7 +172,8 @@ export class Viewer3D {
                     }
 
                     const ns = new NURBSSurface(data.degreeU, data.degreeV, data.knotsU, data.knotsV, controlPoints);
-                    const geometry = new ParametricGeometry((u, v, target) => ns.getPoint(u, v, target), 64, 64);
+                    // Increased sampling from 64 to 256 to minimize linear interpolation error at knots
+                    const geometry = new ParametricGeometry((u, v, target) => ns.getPoint(u, v, target), 256, 256);
                     const material = new THREE.MeshStandardMaterial({ 
                         color: 0xffaa00, 
                         side: THREE.DoubleSide,
