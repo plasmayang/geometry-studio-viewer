@@ -6,6 +6,7 @@ class App {
     constructor() {
         this.viewer = new Viewer3D();
         this.ui = null;
+        this.currentCase = 'case1.json';
     }
 
     async init() {
@@ -13,6 +14,10 @@ class App {
         this.viewer.init(container);
 
         this.ui = new UIController({
+            onCaseChange: (caseFile) => {
+                this.currentCase = caseFile;
+                this.loadData();
+            },
             onWireframeToggle: (enabled) => this.viewer.setWireframe(enabled),
             onNormalsToggle: (enabled) => this.viewer.showNormals(enabled),
             onGridToggle: (enabled) => this.viewer.setGrid(enabled),
@@ -25,12 +30,11 @@ class App {
 
     async loadData() {
         try {
-            // Using absolute path for Vite
-            const response = await fetch('/src/mock/loft_output.json');
-            if (!response.ok) throw new Error('Failed to fetch mock data');
+            const response = await fetch(`/src/mock/${this.currentCase}`);
+            if (!response.ok) throw new Error(`Failed to fetch ${this.currentCase}`);
             
             const jsonData = await response.json();
-            console.log('Kernel Info:', jsonData.kernelInfo);
+            console.log('Case Loaded:', jsonData.caseName);
             
             const { geometry, markers, nurbs } = GeometryParser.parseMesh(jsonData);
             this.viewer.loadMesh(geometry, markers, nurbs);
@@ -42,3 +46,4 @@ class App {
 
 const app = new App();
 app.init();
+
