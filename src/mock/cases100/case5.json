@@ -4,6 +4,9 @@
   "geometry": {
     "type": "NURBS_Collection",
     "mesh": { "vertices": [], "indices": [] },
+    "debugMarkers": {
+      "singularities": [0.467842, 0.663958, 0]
+    },
     "nurbs": {
       "curves": [
         {
