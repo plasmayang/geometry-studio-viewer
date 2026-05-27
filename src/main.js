@@ -100,8 +100,14 @@ class App {
             } else {
                 const jsonData = await response.json();
                 console.log('Case Loaded:', jsonData.caseName);
+                
                 document.getElementById('case-title').innerText = jsonData.caseName || 'Untitled Case';
-                document.getElementById('case-description').innerText = jsonData.description || 'No description available.';
+                
+                let infoHtml = `<strong>Design Intent:</strong><br/>${jsonData.design_intent || jsonData.description || 'N/A'}<br/><br/>`;
+                infoHtml += `<strong>Success Criteria:</strong><br/>${jsonData.success_criteria || 'N/A'}`;
+                
+                document.getElementById('case-description').innerHTML = infoHtml;
+
                 const { geometry, markers, nurbs } = GeometryParser.parseMesh(jsonData);
                 this.viewer.loadMesh(geometry, markers, nurbs);
             }
