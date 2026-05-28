@@ -25,7 +25,9 @@ export class Viewer3D {
             side: THREE.DoubleSide,
             flatShading: false,
             shininess: 30,
-            specular: 0x111111
+            specular: 0x111111,
+            transparent: true,
+            opacity: 0.6
         });
     }
 
@@ -232,7 +234,9 @@ export class Viewer3D {
                         color: 0xffaa00, 
                         side: THREE.DoubleSide,
                         metalness: 0.3,
-                        roughness: 0.4
+                        roughness: 0.4,
+                        transparent: true,
+                        opacity: 0.7
                     });
                     const sMesh = new THREE.Mesh(geometry, material);
                     this.nurbsGroup.add(sMesh);

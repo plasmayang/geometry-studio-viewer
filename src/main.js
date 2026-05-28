@@ -8,7 +8,7 @@ class App {
         this.viewer = new Viewer3D();
         this.ui = null;
         this.currentCase = null;
-        this.dataSourceBase = '/src/mock/data_source/propagation'; // Default to propagation gallery
+        this.dataSourceBase = '/src/mock/data_source'; // Reverted to root to avoid pathing issues
     }
 
     async init() {
