@@ -8,7 +8,7 @@ class App {
         this.viewer = new Viewer3D();
         this.ui = null;
         this.currentCase = null;
-        this.dataSourceBase = '/src/mock/data_source'; // Default symlinked path
+        this.dataSourceBase = '/src/mock/data_source/propagation'; // Default to propagation gallery
     }
 
     async init() {
