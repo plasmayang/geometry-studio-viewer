@@ -178,13 +178,23 @@ export class Viewer3D {
                 try {
                     const p = data.degree;
                     const cps = [];
-                    // Support both weighted [x,y,z,w] and non-weighted [x,y,z] formats
-                    for (let i = 0; i < data.controlPoints.length; i += 4) {
+                    
+                    // Detect stride: 3 for [x,y,z], 4 for [x,y,z,w]
+                    let stride = 4; // Default to 4 as per recent "rational" update
+                    if (data.controlPoints && data.controlPoints.length > 0) {
+                        const numPoints = (data.knots && data.knots.length > 0) ? (data.knots.length - p - 1) : (data.controlPoints.length / 3);
+                        // If it doesn't divide evenly by 4, it must be 3 (or something else, but 3 is the only other supported)
+                        if (data.controlPoints.length % 4 !== 0 || data.controlPoints.length === numPoints * 3) {
+                            stride = 3;
+                        }
+                    }
+
+                    for (let i = 0; i < data.controlPoints.length; i += stride) {
                         cps.push(new THREE.Vector4(
                             data.controlPoints[i],
                             data.controlPoints[i+1],
                             data.controlPoints[i+2],
-                            data.controlPoints[i+3] || 1.0
+                            (stride === 4) ? data.controlPoints[i+3] : 1.0
                         ));
                     }
 
@@ -259,16 +269,19 @@ export class Viewer3D {
                     const numV = data.knotsV.length - data.degreeV - 1;
                     console.log(`Rendering Surface: U(${numU}, deg ${data.degreeU}), V(${numV}, deg ${data.degreeV})`);
 
+                    const stride = data.controlPoints.length / (numU * numV);
+                    console.log(`Detected Surface Stride: ${stride}`);
+
                     const controlPoints = [];
                     for (let i = 0; i < numU; i++) {
                         controlPoints[i] = [];
                         for (let j = 0; j < numV; j++) {
-                            const idx = (j * numU + i) * 4;
+                            const idx = (j * numU + i) * stride;
                             controlPoints[i][j] = new THREE.Vector4(
                                 data.controlPoints[idx],
                                 data.controlPoints[idx+1],
                                 data.controlPoints[idx+2],
-                                data.controlPoints[idx+3] || 1.0
+                                (stride === 4) ? data.controlPoints[idx+3] : 1.0
                             );
                         }
                     }
