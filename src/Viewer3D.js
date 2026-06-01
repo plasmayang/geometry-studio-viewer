@@ -178,8 +178,14 @@ export class Viewer3D {
                 try {
                     const p = data.degree;
                     const cps = [];
-                    for (let i = 0; i < data.controlPoints.length; i += 3) {
-                        cps.push(new THREE.Vector4(data.controlPoints[i], data.controlPoints[i+1], data.controlPoints[i+2], 1));
+                    // Support both weighted [x,y,z,w] and non-weighted [x,y,z] formats
+                    for (let i = 0; i < data.controlPoints.length; i += 4) {
+                        cps.push(new THREE.Vector4(
+                            data.controlPoints[i],
+                            data.controlPoints[i+1],
+                            data.controlPoints[i+2],
+                            data.controlPoints[i+3] || 1.0
+                        ));
                     }
 
                     // Handle periodic curves: data provider often omits the wrapped control points
@@ -252,17 +258,17 @@ export class Viewer3D {
                     const numU = data.knotsU.length - data.degreeU - 1;
                     const numV = data.knotsV.length - data.degreeV - 1;
                     console.log(`Rendering Surface: U(${numU}, deg ${data.degreeU}), V(${numV}, deg ${data.degreeV})`);
-                    
+
                     const controlPoints = [];
                     for (let i = 0; i < numU; i++) {
                         controlPoints[i] = [];
                         for (let j = 0; j < numV; j++) {
-                            const idx = (j * numU + i) * 3;
+                            const idx = (j * numU + i) * 4;
                             controlPoints[i][j] = new THREE.Vector4(
-                                data.controlPoints[idx], 
-                                data.controlPoints[idx+1], 
-                                data.controlPoints[idx+2], 
-                                1
+                                data.controlPoints[idx],
+                                data.controlPoints[idx+1],
+                                data.controlPoints[idx+2],
+                                data.controlPoints[idx+3] || 1.0
                             );
                         }
                     }
