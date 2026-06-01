@@ -180,7 +180,19 @@ export class Viewer3D {
                     for (let i = 0; i < data.controlPoints.length; i += 3) {
                         cps.push(new THREE.Vector4(data.controlPoints[i], data.controlPoints[i+1], data.controlPoints[i+2], 1));
                     }
-                    const curve = new NURBSCurve(data.degree, data.knots, cps);
+                    
+                    let knots = data.knots;
+                    if (!knots || knots.length === 0) {
+                        // Generate default uniform clamped knots if missing
+                        const p = data.degree;
+                        const n = cps.length - 1;
+                        knots = [];
+                        for (let i = 0; i <= p; i++) knots.push(0);
+                        for (let i = 1; i < n - p + 1; i++) knots.push(i / (n - p + 1));
+                        for (let i = 0; i <= p; i++) knots.push(1);
+                    }
+
+                    const curve = new NURBSCurve(data.degree, knots, cps);
                     const curvePoints = curve.getPoints(200);
                     const geometry = new THREE.BufferGeometry().setFromPoints(curvePoints);
                     
@@ -192,8 +204,6 @@ export class Viewer3D {
                     const material = new THREE.LineBasicMaterial({ color: color, linewidth: 2 });
                     const line = new THREE.Line(geometry, material);
                     this.nurbsGroup.add(line);
-
-                    console.log(`Added curve [${data.type}]: ${data.label || index} with ${curvePoints.length} points.`);
 
                     // Add Spatial Label
                     if (data.label) {
@@ -278,20 +288,21 @@ export class Viewer3D {
     addLabel(text, position, color) {
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d');
-        canvas.width = 256;
-        canvas.height = 64;
+        // Double resolution for sharper text with larger font
+        canvas.width = 512;
+        canvas.height = 128;
 
         context.fillStyle = 'rgba(255, 255, 255, 0.9)';
-        context.fillRect(0, 0, 256, 64);
-        context.lineWidth = 4;
+        context.fillRect(0, 0, 512, 128);
+        context.lineWidth = 8;
         context.strokeStyle = '#' + new THREE.Color(color).getHexString();
-        context.strokeRect(0, 0, 256, 64);
+        context.strokeRect(0, 0, 512, 128);
 
-        context.font = 'Bold 24px Arial';
+        context.font = 'Bold 48px Arial';
         context.fillStyle = '#1a1a1a';
         context.textAlign = 'center';
         context.textBaseline = 'middle';
-        context.fillText(text, 128, 32);
+        context.fillText(text, 256, 64);
 
         const texture = new THREE.CanvasTexture(canvas);
         const spriteMaterial = new THREE.SpriteMaterial({ map: texture, transparent: true });
@@ -299,7 +310,7 @@ export class Viewer3D {
         
         sprite.position.copy(position);
         sprite.position.y += 0.5; // Offset slightly above
-        sprite.scale.set(2, 0.5, 1);
+        sprite.scale.set(3, 0.75, 1); // Scaled for better visibility
         
         this.nurbsGroup.add(sprite);
     }
