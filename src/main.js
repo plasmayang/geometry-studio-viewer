@@ -51,6 +51,7 @@ class App {
                     this.refreshGallery();
                 },
                 onWireframeToggle: (enabled) => this.viewer.setWireframe(enabled),
+                onControlPolygonToggle: (enabled) => this.viewer.setControlPolygon(enabled),
                 onNormalsToggle: (enabled) => this.viewer.showNormals(enabled),
                 onGridToggle: (enabled) => this.viewer.setGrid(enabled),
                 onColorChange: (color) => this.viewer.setMeshColor(color),
@@ -103,8 +104,9 @@ class App {
                 
                 document.getElementById('case-title').innerText = jsonData.caseName || 'Untitled Case';
                 
-                let infoHtml = `<strong>Design Intent:</strong><br/>${jsonData.design_intent || jsonData.description || 'N/A'}<br/><br/>`;
-                infoHtml += `<strong>Success Criteria:</strong><br/>${jsonData.success_criteria || 'N/A'}`;
+                let infoHtml = `<div style="margin-bottom: 10px; border-bottom: 1px solid #eee; padding-bottom: 5px;"><strong>Summary:</strong><br/>${jsonData.description || 'N/A'}</div>`;
+                infoHtml += `<div style="margin-bottom: 10px;"><strong>Intent Space:</strong><br/><span style="font-family: monospace; font-size: 11px; white-space: pre-wrap;">${jsonData.intent_space || 'N/A'}</span></div>`;
+                infoHtml += `<div><strong>Success Criteria:</strong><br/><span style="color: #2e7d32;">${jsonData.success_criteria || 'N/A'}</span></div>`;
                 
                 document.getElementById('case-description').innerHTML = infoHtml;
 

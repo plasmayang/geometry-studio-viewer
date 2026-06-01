@@ -47,9 +47,9 @@
 </head>
 <body>
     <div id="app"></div>
-    <div id="info-panel" style="position: absolute; top: 20px; left: 20px; width: 300px; padding: 15px; background: rgba(255,255,255,0.8); backdrop-filter: blur(10px); border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,0.1); pointer-events: none;">
-        <h2 id="case-title" style="margin: 0 0 10px 0; font-size: 18px; color: #1a1a1a;">Select a Case</h2>
-        <p id="case-description" style="margin: 0; font-size: 13px; line-height: 1.5; color: #4a4a4a;">Loading gallery data...</p>
+    <div id="info-panel" style="position: absolute; top: 20px; left: 20px; width: 320px; max-height: 80vh; overflow-y: auto; padding: 15px; background: rgba(255,255,255,0.85); backdrop-filter: blur(10px); border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,0.1); z-index: 100;">
+        <h2 id="case-title" style="margin: 0 0 10px 0; font-size: 18px; color: #1a1a1a; border-bottom: 2px solid #3366ff; padding-bottom: 5px;">Select a Case</h2>
+        <div id="case-description" style="margin: 0; font-size: 13px; line-height: 1.4; color: #4a4a4a;">Loading gallery data...</div>
     </div>
     <script type="module" src="/src/main.js"></script>
 </body>

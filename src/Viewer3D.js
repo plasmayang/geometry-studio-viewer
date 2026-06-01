@@ -241,6 +241,33 @@ export class Viewer3D {
                     const sMesh = new THREE.Mesh(geometry, material);
                     this.nurbsGroup.add(sMesh);
                     console.log("Surface mesh added to scene.");
+
+                    // --- Control Polygon Rendering ---
+                    const polyGroup = new THREE.Group();
+                    const polyMaterial = new THREE.LineBasicMaterial({ color: 0x999999, transparent: true, opacity: 0.4 });
+                    
+                    // Lines along U
+                    for (let j = 0; j < numV; j++) {
+                        const pts = [];
+                        for (let i = 0; i < numU; i++) {
+                            const p = controlPoints[i][j];
+                            pts.push(new THREE.Vector3(p.x, p.y, p.z));
+                        }
+                        const polyGeom = new THREE.BufferGeometry().setFromPoints(pts);
+                        polyGroup.add(new THREE.Line(polyGeom, polyMaterial));
+                    }
+                    // Lines along V
+                    for (let i = 0; i < numU; i++) {
+                        const pts = [];
+                        for (let j = 0; j < numV; j++) {
+                            const p = controlPoints[i][j];
+                            pts.push(new THREE.Vector3(p.x, p.y, p.z));
+                        }
+                        const polyGeom = new THREE.BufferGeometry().setFromPoints(pts);
+                        polyGroup.add(new THREE.Line(polyGeom, polyMaterial));
+                    }
+                    polyGroup.name = "controlPolygon";
+                    this.nurbsGroup.add(polyGroup);
                 } catch (e) {
                     console.error("NURBS Surface Error:", e);
                 }
@@ -275,6 +302,14 @@ export class Viewer3D {
         sprite.scale.set(2, 0.5, 1);
         
         this.nurbsGroup.add(sprite);
+    }
+
+    setControlPolygon(enabled) {
+        this.nurbsGroup.traverse(child => {
+            if (child.name === "controlPolygon") {
+                child.visible = enabled;
+            }
+        });
     }
 
     setWireframe(enabled) { this.material.wireframe = enabled; }

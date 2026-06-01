@@ -11,6 +11,7 @@ export class UIController {
             case: callbacks.manifest.length > 0 ? callbacks.manifest[0].file : '',
             dataSource: callbacks.dataSource,
             wireframe: false,
+            showControlPolygon: true,
             showNormals: false,
             grid: true,
             color: '#4488ff',
@@ -53,6 +54,9 @@ export class UIController {
 
         displayFolder.addBinding(this.params, 'wireframe', { label: 'Wireframe' })
             .on('change', (ev) => callbacks.onWireframeToggle(ev.value));
+
+        displayFolder.addBinding(this.params, 'showControlPolygon', { label: 'Control Polygon' })
+            .on('change', (ev) => callbacks.onControlPolygonToggle(ev.value));
 
         displayFolder.addBinding(this.params, 'showNormals', { label: 'Show Normals' })
             .on('change', (ev) => callbacks.onNormalsToggle(ev.value));
