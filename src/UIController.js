@@ -52,6 +52,11 @@ export class UIController {
             title: 'Visuals',
         });
 
+        this.surfaceFolder = this.pane.addFolder({
+            title: 'Surfaces',
+            expanded: true
+        });
+
         displayFolder.addBinding(this.params, 'wireframe', { label: 'Wireframe' })
             .on('change', (ev) => callbacks.onWireframeToggle(ev.value));
 
@@ -75,6 +80,18 @@ export class UIController {
             title: 'Reload Current',
         }).on('click', () => {
             callbacks.onReload();
+        });
+    }
+
+    updateSurfaceToggles(surfaces, onToggle) {
+        // Clear existing surface bindings
+        this.surfaceFolder.children.forEach(c => c.dispose());
+        
+        surfaces.forEach(label => {
+            const params = { visible: true };
+            this.surfaceFolder.addBinding(params, 'visible', {
+                label: label
+            }).on('change', (ev) => onToggle(label, ev.value));
         });
     }
 }

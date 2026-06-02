@@ -111,7 +111,11 @@ class App {
                 document.getElementById('case-description').innerHTML = infoHtml;
 
                 const { geometry, markers, nurbs } = GeometryParser.parseMesh(jsonData);
-                this.viewer.loadMesh(geometry, markers, nurbs);
+                const surfaceLabels = this.viewer.loadMesh(geometry, markers, nurbs);
+                
+                this.ui.updateSurfaceToggles(surfaceLabels, (label, visible) => {
+                    this.viewer.setSurfaceVisibility(label, visible);
+                });
             }
         } catch (error) {
             console.error('Error loading data:', error);
