@@ -258,8 +258,66 @@ export class Viewer3D {
                     }
 
                     const ns = new NURBSSurface(data.degreeU, data.degreeV, data.knotsU, data.knotsV, controlPoints);
-                    // Increased sampling from 64 to 256 to minimize linear interpolation error at knots
-                    const geometry = new ParametricGeometry((u, v, target) => ns.getPoint(u, v, target), 256, 256);
+                    
+                    // Create a sampling grid that includes uniform steps AND exact knot values to prevent corner cut-offs
+                    const getSamples = (knots, degree, steps) => {
+                        const min = knots[degree];
+                        const max = knots[knots.length - degree - 1];
+                        const range = max - min;
+                        let samples = [];
+                        for (let i = 0; i <= steps; i++) {
+                            samples.push(i / steps);
+                        }
+                        for (let i = degree; i <= knots.length - degree - 1; i++) {
+                            if (range > 0) {
+                                let normKnot = (knots[i] - min) / range;
+                                samples.push(normKnot);
+                            }
+                        }
+                        samples.sort((a, b) => a - b);
+                        let uniqueSamples = [samples[0]];
+                        for (let i = 1; i < samples.length; i++) {
+                            if (samples[i] - uniqueSamples[uniqueSamples.length - 1] > 1e-6) {
+                                uniqueSamples.push(samples[i]);
+                            }
+                        }
+                        return uniqueSamples;
+                    };
+
+                    const uSamples = getSamples(data.knotsU, data.degreeU, 100);
+                    const vSamples = getSamples(data.knotsV, data.degreeV, 100);
+
+                    const geometry = new THREE.BufferGeometry();
+                    const vertices = [];
+                    const indices = [];
+                    const uvs = [];
+                    const target = new THREE.Vector3();
+
+                    for (let j = 0; j < vSamples.length; j++) {
+                        for (let i = 0; i < uSamples.length; i++) {
+                            ns.getPoint(uSamples[i], vSamples[j], target);
+                            vertices.push(target.x, target.y, target.z);
+                            uvs.push(uSamples[i], vSamples[j]);
+                        }
+                    }
+
+                    const cols = uSamples.length;
+                    for (let j = 0; j < vSamples.length - 1; j++) {
+                        for (let i = 0; i < cols - 1; i++) {
+                            const a = i + j * cols;
+                            const b = i + 1 + j * cols;
+                            const c = i + (j + 1) * cols;
+                            const d = i + 1 + (j + 1) * cols;
+                            indices.push(a, b, d);
+                            indices.push(a, d, c);
+                        }
+                    }
+
+                    geometry.setIndex(indices);
+                    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+                    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+                    geometry.computeVertexNormals();
+
                     const material = new THREE.MeshStandardMaterial({ 
                         color: 0xffaa00, 
                         side: THREE.DoubleSide,
