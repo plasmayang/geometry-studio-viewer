@@ -197,49 +197,20 @@ export class Viewer3D {
                             (stride === 4) ? data.controlPoints[i+3] : 1.0
                         ));
                     }
-
-                    // Handle periodic curves: data provider often omits the wrapped control points
-                    if (data.isPeriodic) {
-                        for (let i = 0; i < p; i++) {
-                            cps.push(cps[i].clone());
-                        }
-                    }
                     
                     let knots = data.knots;
                     if (!knots || knots.length === 0) {
                         const n_ext = cps.length - 1;
                         knots = [];
-                        if (data.isPeriodic) {
-                            // For periodic, we need a uniform knot vector to support the wrapped points
-                            for (let i = 0; i <= n_ext + p + 1; i++) {
-                                knots.push(i);
-                            }
-                        } else {
-                            // Generate default uniform clamped knots if missing
-                            for (let i = 0; i <= p; i++) knots.push(0);
-                            for (let i = 1; i < n_ext - p + 1; i++) knots.push(i / (n_ext - p + 1));
-                            for (let i = 0; i <= p; i++) knots.push(1);
-                        }
+                        // Generate default uniform clamped knots if missing (matching kernel logic)
+                        for (let i = 0; i <= p; i++) knots.push(0);
+                        for (let i = 1; i < n_ext - p + 1; i++) knots.push(i / (n_ext - p + 1));
+                        for (let i = 0; i <= p; i++) knots.push(1);
                     }
 
                     const curve = new NURBSCurve(p, knots, cps);
-                    let curvePoints;
-                    if (data.isPeriodic) {
-                        curvePoints = [];
-                        const divisions = 200;
-                        const kStart = knots[p];
-                        const kEnd = knots[cps.length];
-                        const kMin = knots[0];
-                        const kMax = knots[knots.length - 1];
-                        for (let i = 0; i <= divisions; i++) {
-                            const t = i / divisions;
-                            const u = kStart + t * (kEnd - kStart);
-                            const tNorm = (u - kMin) / (kMax - kMin);
-                            curvePoints.push(curve.getPoint(tNorm));
-                        }
-                    } else {
-                        curvePoints = curve.getPoints(200);
-                    }
+                    const curvePoints = curve.getPoints(200);
+
                     const geometry = new THREE.BufferGeometry().setFromPoints(curvePoints);
                     
                     let color = 0x3366ff; // Default Blue
