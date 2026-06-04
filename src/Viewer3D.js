@@ -164,7 +164,14 @@ export class Viewer3D {
                     for (let i = 0; i < data.controlPoints.length; i += stride) {
                         cps.push(new THREE.Vector4(data.controlPoints[i], data.controlPoints[i+1], data.controlPoints[i+2], (stride === 4) ? data.controlPoints[i+3] : 1.0));
                     }
-                    const curve = new NURBSCurve(p, data.knots, cps);
+                    const curveKnots = (data.knots && data.knots.length > 0) ? data.knots : (function() {
+                        const ks = [];
+                        for (let k = 0; k <= p; k++) ks.push(0);
+                        for (let k = 1; k < numPts - p; k++) ks.push(k);
+                        for (let k = 0; k <= p; k++) ks.push(Math.max(1, numPts - p));
+                        return ks;
+                    })();
+                    const curve = new NURBSCurve(p, curveKnots, cps);
                     const geometry = new THREE.BufferGeometry().setFromPoints(curve.getPoints(100));
                     const color = data.type === 'section' ? 0x000000 : (data.type === 'guide' ? 0xff00ff : 0x008800);
                     this.nurbsGroup.add(new THREE.Line(geometry, new THREE.LineBasicMaterial({ color, linewidth: 2 })));
