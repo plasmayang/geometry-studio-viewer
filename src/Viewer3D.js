@@ -156,13 +156,14 @@ export class Viewer3D {
         if (nurbsData.curves) {
             nurbsData.curves.forEach(data => {
                 try {
-                    const p = data.degree;
+                    const p = data.degree !== undefined ? data.degree : data.p;
+                    const rawCPs = data.controlPoints || data.control_points;
                     const cps = [];
                     // Rational Stride detection
-                    const numPts = (data.knots && data.knots.length > 0) ? (data.knots.length - p - 1) : (data.controlPoints.length / 3);
-                    const stride = data.controlPoints.length / numPts;
-                    for (let i = 0; i < data.controlPoints.length; i += stride) {
-                        cps.push(new THREE.Vector4(data.controlPoints[i], data.controlPoints[i+1], data.controlPoints[i+2], (stride === 4) ? data.controlPoints[i+3] : 1.0));
+                    const numPts = (data.knots && data.knots.length > 0) ? (data.knots.length - p - 1) : (rawCPs.length / 3);
+                    const stride = rawCPs.length / numPts;
+                    for (let i = 0; i < rawCPs.length; i += stride) {
+                        cps.push(new THREE.Vector4(rawCPs[i], rawCPs[i+1], rawCPs[i+2], (stride === 4) ? rawCPs[i+3] : 1.0));
                     }
                     const curveKnots = (data.knots && data.knots.length > 0) ? data.knots : (function() {
                         const ks = [];
