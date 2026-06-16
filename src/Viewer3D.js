@@ -175,25 +175,38 @@ export class Viewer3D {
                 try {
                     const p = data.degree !== undefined ? data.degree : data.p;
                     let rawCPs = data.controlPoints || data.control_points;
+                    let isFlatObj = false;
                     if (rawCPs && rawCPs.length > 0 && typeof rawCPs[0] === 'object') {
                         const flat = [];
                         rawCPs.forEach(pt => flat.push(pt.x, pt.y, pt.z));
                         rawCPs = flat;
+                        isFlatObj = true;
                     }
+                    
+                    let curveKnots;
+                    let numPts;
+                    if (data.knots && data.knots.length > 0) {
+                        curveKnots = Array.from(data.knots);
+                        let m = 1;
+                        while (curveKnots.length > 2 && curveKnots[curveKnots.length - 1] === curveKnots[curveKnots.length - 1 - m]) m++;
+                        if (m > p + 1) curveKnots.length -= (m - (p + 1));
+                        numPts = curveKnots.length - p - 1;
+                    } else {
+                        numPts = isFlatObj ? (rawCPs.length / 3) : Math.floor(rawCPs.length / 3);
+                        curveKnots = [];
+                        for (let k = 0; k <= p; k++) curveKnots.push(0);
+                        for (let k = 1; k < numPts - p; k++) curveKnots.push(k);
+                        for (let k = 0; k <= p; k++) curveKnots.push(Math.max(1, numPts - p));
+                    }
+
+                    const realStride = isFlatObj ? 3 : (rawCPs.length % 3 === 0 ? 3 : 4);
+                    const numCPsProvided = Math.floor(rawCPs.length / realStride);
                     const cps = [];
-                    // Rational Stride detection
-                    const numPts = (data.knots && data.knots.length > 0) ? (data.knots.length - p - 1) : (rawCPs.length / 3);
-                    const stride = rawCPs.length / numPts;
-                    for (let i = 0; i < rawCPs.length; i += stride) {
-                        cps.push(new THREE.Vector4(rawCPs[i], rawCPs[i+1], rawCPs[i+2], (stride === 4) ? rawCPs[i+3] : 1.0));
+                    for (let i = 0; i < numPts; i++) {
+                        const idx = (i % numCPsProvided) * realStride;
+                        cps.push(new THREE.Vector4(rawCPs[idx], rawCPs[idx+1], rawCPs[idx+2], (realStride === 4) ? rawCPs[idx+3] : 1.0));
                     }
-                    const curveKnots = (data.knots && data.knots.length > 0) ? data.knots : (function() {
-                        const ks = [];
-                        for (let k = 0; k <= p; k++) ks.push(0);
-                        for (let k = 1; k < numPts - p; k++) ks.push(k);
-                        for (let k = 0; k <= p; k++) ks.push(Math.max(1, numPts - p));
-                        return ks;
-                    })();
+
                     const curve = new NURBSCurve(p, curveKnots, cps);
                     const pts = curve.getPoints(100);
                     pts.forEach((pt, i) => {
@@ -221,8 +234,6 @@ export class Viewer3D {
 
                     const degreeU = data.degreeU !== undefined ? data.degreeU : data.p_u;
                     const degreeV = data.degreeV !== undefined ? data.degreeV : data.p_v;
-                    const knotsU = data.knotsU || data.knots_u;
-                    const knotsV = data.knotsV || data.knots_v;
                     let rawCPs = data.controlPoints || data.control_points;
                     let isFlatObj = false;
                     if (rawCPs && rawCPs.length > 0 && typeof rawCPs[0] === 'object') {
@@ -232,6 +243,17 @@ export class Viewer3D {
                         isFlatObj = true;
                     }
 
+                    const sanitizeKnots = (knots, degree) => {
+                        let ks = Array.from(knots);
+                        let m = 1;
+                        while (ks.length > 2 && ks[ks.length - 1] === ks[ks.length - 1 - m]) m++;
+                        if (m > degree + 1) ks.length -= (m - (degree + 1));
+                        return ks;
+                    };
+
+                    const knotsU = sanitizeKnots(data.knotsU || data.knots_u, degreeU);
+                    const knotsV = sanitizeKnots(data.knotsV || data.knots_v, degreeV);
+
                     const numU = knotsU.length - degreeU - 1;
                     const numV = knotsV.length - degreeV - 1;
                     
@@ -239,12 +261,15 @@ export class Viewer3D {
                                           (data.n_v !== undefined ? data.n_v + 1 : numV);
                     const stride = isFlatObj ? 3 : Math.max(1, Math.round(rawCPs.length / expectedTotal));
                     const realNumU = data.n_u !== undefined ? data.n_u + 1 : numU;
+                    const realNumV = data.n_v !== undefined ? data.n_v + 1 : numV;
 
                     const controlPoints = [];
                     for (let i = 0; i < numU; i++) {
                         controlPoints[i] = [];
                         for (let j = 0; j < numV; j++) {
-                            const idx = (j * realNumU + i) * stride;
+                            const mapI = i % realNumU;
+                            const mapJ = j % realNumV;
+                            const idx = (mapJ * realNumU + mapI) * stride;
                             controlPoints[i][j] = new THREE.Vector4(rawCPs[idx], rawCPs[idx+1], rawCPs[idx+2], (stride === 4) ? rawCPs[idx+3] : 1.0);
                         }
                     }
