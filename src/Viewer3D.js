@@ -116,11 +116,28 @@ export class Viewer3D {
         }
         if (nurbs && nurbs.surfaces) {
             nurbs.surfaces.forEach(s => {
-                const numU = s.knotsU.length - s.degreeU - 1;
-                const numV = s.knotsV.length - s.degreeV - 1;
-                const stride = s.controlPoints.length / (numU * numV);
-                for (let i = 0; i < s.controlPoints.length; i += stride) {
-                    bbox.expandByPoint(new THREE.Vector3(s.controlPoints[i], s.controlPoints[i+1], s.controlPoints[i+2]));
+                const degreeU = s.degreeU !== undefined ? s.degreeU : s.p_u;
+                const degreeV = s.degreeV !== undefined ? s.degreeV : s.p_v;
+                const knotsU = s.knotsU || s.knots_u;
+                const knotsV = s.knotsV || s.knots_v;
+                let rawCPs = s.controlPoints || s.controlPoints;
+                let isFlatObj = false;
+                if (rawCPs && rawCPs.length > 0 && typeof rawCPs[0] === 'object') {
+                    const flat = [];
+                    rawCPs.forEach(pt => flat.push(pt.x, pt.y, pt.z));
+                    rawCPs = flat;
+                    isFlatObj = true;
+                }
+                if (!knotsU || !knotsV || !rawCPs) return;
+
+                const expectedTotal = (s.n_u !== undefined ? s.n_u + 1 : (knotsU.length - degreeU - 1)) * 
+                                      (s.n_v !== undefined ? s.n_v + 1 : (knotsV.length - degreeV - 1));
+                const stride = isFlatObj ? 3 : Math.max(1, Math.round(rawCPs.length / expectedTotal));
+                
+                for (let i = 0; i < rawCPs.length; i += stride) {
+                    if (!isNaN(rawCPs[i]) && !isNaN(rawCPs[i+1]) && !isNaN(rawCPs[i+2])) {
+                        bbox.expandByPoint(new THREE.Vector3(rawCPs[i], rawCPs[i+1], rawCPs[i+2]));
+                    }
                 }
             });
         }
@@ -157,7 +174,12 @@ export class Viewer3D {
             nurbsData.curves.forEach(data => {
                 try {
                     const p = data.degree !== undefined ? data.degree : data.p;
-                    const rawCPs = data.controlPoints || data.control_points;
+                    let rawCPs = data.controlPoints || data.control_points;
+                    if (rawCPs && rawCPs.length > 0 && typeof rawCPs[0] === 'object') {
+                        const flat = [];
+                        rawCPs.forEach(pt => flat.push(pt.x, pt.y, pt.z));
+                        rawCPs = flat;
+                    }
                     const cps = [];
                     // Rational Stride detection
                     const numPts = (data.knots && data.knots.length > 0) ? (data.knots.length - p - 1) : (rawCPs.length / 3);
@@ -173,7 +195,14 @@ export class Viewer3D {
                         return ks;
                     })();
                     const curve = new NURBSCurve(p, curveKnots, cps);
-                    const geometry = new THREE.BufferGeometry().setFromPoints(curve.getPoints(100));
+                    const pts = curve.getPoints(100);
+                    pts.forEach((pt, i) => {
+                        if (isNaN(pt.x) || isNaN(pt.y) || isNaN(pt.z)) {
+                            console.error(`NaN in Curve getPoints! i=${i}`);
+                            pt.set(0, 0, 0);
+                        }
+                    });
+                    const geometry = new THREE.BufferGeometry().setFromPoints(pts);
                     const color = data.type === 'section' ? 0x000000 : (data.type === 'guide' ? 0xff00ff : 0x008800);
                     this.nurbsGroup.add(new THREE.Line(geometry, new THREE.LineBasicMaterial({ color, linewidth: 2 })));
                 } catch (e) { console.error(e); }
@@ -194,16 +223,28 @@ export class Viewer3D {
                     const degreeV = data.degreeV !== undefined ? data.degreeV : data.p_v;
                     const knotsU = data.knotsU || data.knots_u;
                     const knotsV = data.knotsV || data.knots_v;
-                    const rawCPs = data.controlPoints || data.control_points;
+                    let rawCPs = data.controlPoints || data.control_points;
+                    let isFlatObj = false;
+                    if (rawCPs && rawCPs.length > 0 && typeof rawCPs[0] === 'object') {
+                        const flat = [];
+                        rawCPs.forEach(pt => flat.push(pt.x, pt.y, pt.z));
+                        rawCPs = flat;
+                        isFlatObj = true;
+                    }
 
                     const numU = knotsU.length - degreeU - 1;
                     const numV = knotsV.length - degreeV - 1;
-                    const stride = rawCPs.length / (numU * numV);
+                    
+                    const expectedTotal = (data.n_u !== undefined ? data.n_u + 1 : numU) * 
+                                          (data.n_v !== undefined ? data.n_v + 1 : numV);
+                    const stride = isFlatObj ? 3 : Math.max(1, Math.round(rawCPs.length / expectedTotal));
+                    const realNumU = data.n_u !== undefined ? data.n_u + 1 : numU;
+
                     const controlPoints = [];
                     for (let i = 0; i < numU; i++) {
                         controlPoints[i] = [];
                         for (let j = 0; j < numV; j++) {
-                            const idx = (j * numU + i) * stride;
+                            const idx = (j * realNumU + i) * stride;
                             controlPoints[i][j] = new THREE.Vector4(rawCPs[idx], rawCPs[idx+1], rawCPs[idx+2], (stride === 4) ? rawCPs[idx+3] : 1.0);
                         }
                     }
@@ -225,6 +266,10 @@ export class Viewer3D {
                     for (let j = 0; j < vS.length; j++) {
                         for (let i = 0; i < uS.length; i++) {
                             ns.getPoint(uS[i], vS[j], target);
+                            if (isNaN(target.x) || isNaN(target.y) || isNaN(target.z)) {
+                                console.error(`NaN detected in NURBSSurface getPoint! u=${uS[i]}, v=${vS[j]}`);
+                                target.set(0, 0, 0);
+                            }
                             verts.push(target.x, target.y, target.z); uvs.push(uS[i], vS[j]);
                         }
                     }
@@ -245,8 +290,25 @@ export class Viewer3D {
                     const pMat = new THREE.LineBasicMaterial({ color: schemeColors[label] || 0x999999, transparent: true, opacity: 0.2 });
                     for (let j = 0; j < numV; j++) {
                         const pts = []; for (let i = 0; i < numU; i++) {
-                            const idx = (j * numU + i) * stride;
-                            pts.push(new THREE.Vector3(rawCPs[idx], rawCPs[idx+1], rawCPs[idx+2]));
+                            const idx = (j * realNumU + i) * stride;
+                            let x = rawCPs[idx], y = rawCPs[idx+1], z = rawCPs[idx+2];
+                            if (isNaN(x) || isNaN(y) || isNaN(z)) {
+                                console.error(`NaN in Surface CP Grid (row)! i=${i}, j=${j}, idx=${idx}`);
+                                x = y = z = 0;
+                            }
+                            pts.push(new THREE.Vector3(x, y, z));
+                        }
+                        sGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), pMat));
+                    }
+                    for (let i = 0; i < numU; i++) {
+                        const pts = []; for (let j = 0; j < numV; j++) {
+                            const idx = (j * realNumU + i) * stride;
+                            let x = rawCPs[idx], y = rawCPs[idx+1], z = rawCPs[idx+2];
+                            if (isNaN(x) || isNaN(y) || isNaN(z)) {
+                                console.error(`NaN in Surface CP Grid (col)! i=${i}, j=${j}, idx=${idx}`);
+                                x = y = z = 0;
+                            }
+                            pts.push(new THREE.Vector3(x, y, z));
                         }
                         sGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), pMat));
                     }
