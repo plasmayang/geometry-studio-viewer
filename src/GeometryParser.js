@@ -8,7 +8,7 @@ export class GeometryParser {
      */
     static parseMesh(jsonData) {
         let geometry = new THREE.BufferGeometry();
-        const meshData = jsonData.geometry.mesh;
+        const meshData = jsonData.geometry ? jsonData.geometry.mesh : null;
 
         if (meshData && meshData.vertices && meshData.vertices.length > 0) {
             const vertices = new Float32Array(meshData.vertices);
@@ -28,7 +28,7 @@ export class GeometryParser {
 
         // Parse Markers
         const markers = [];
-        if (jsonData.geometry.debugMarkers && jsonData.geometry.debugMarkers.singularities) {
+        if (jsonData.geometry && jsonData.geometry.debugMarkers && jsonData.geometry.debugMarkers.singularities) {
             const s = jsonData.geometry.debugMarkers.singularities;
             for (let i = 0; i < s.length; i += 3) {
                 markers.push({
@@ -42,7 +42,10 @@ export class GeometryParser {
     }
 
     static parseNurbs(jsonData) {
-        if (!jsonData.geometry.nurbs) return null;
+        if (jsonData.surface) {
+            return { surfaces: [jsonData.surface] };
+        }
+        if (!jsonData.geometry || !jsonData.geometry.nurbs) return null;
         return jsonData.geometry.nurbs;
     }
 }

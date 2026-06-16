@@ -189,19 +189,25 @@ export class Viewer3D {
                     this.surfaceGroups[label] = sGroup;
                     this.nurbsGroup.add(sGroup);
 
-                    const numU = data.knotsU.length - data.degreeU - 1;
-                    const numV = data.knotsV.length - data.degreeV - 1;
-                    const stride = data.controlPoints.length / (numU * numV);
+                    const degreeU = data.degreeU !== undefined ? data.degreeU : data.p_u;
+                    const degreeV = data.degreeV !== undefined ? data.degreeV : data.p_v;
+                    const knotsU = data.knotsU || data.knots_u;
+                    const knotsV = data.knotsV || data.knots_v;
+                    const rawCPs = data.controlPoints || data.control_points;
+
+                    const numU = knotsU.length - degreeU - 1;
+                    const numV = knotsV.length - degreeV - 1;
+                    const stride = rawCPs.length / (numU * numV);
                     const controlPoints = [];
                     for (let i = 0; i < numU; i++) {
                         controlPoints[i] = [];
                         for (let j = 0; j < numV; j++) {
                             const idx = (j * numU + i) * stride;
-                            controlPoints[i][j] = new THREE.Vector4(data.controlPoints[idx], data.controlPoints[idx+1], data.controlPoints[idx+2], (stride === 4) ? data.controlPoints[idx+3] : 1.0);
+                            controlPoints[i][j] = new THREE.Vector4(rawCPs[idx], rawCPs[idx+1], rawCPs[idx+2], (stride === 4) ? rawCPs[idx+3] : 1.0);
                         }
                     }
 
-                    const ns = new NURBSSurface(data.degreeU, data.degreeV, data.knotsU, data.knotsV, controlPoints);
+                    const ns = new NURBSSurface(degreeU, degreeV, knotsU, knotsV, controlPoints);
                     const getSamples = (knots, p, steps) => {
                         const min = knots[p], max = knots[knots.length - p - 1], range = max - min;
                         let s = []; for (let i = 0; i <= steps; i++) s.push(i / steps);
@@ -211,7 +217,7 @@ export class Viewer3D {
                         return u;
                     };
 
-                    const uS = getSamples(data.knotsU, data.degreeU, 40), vS = getSamples(data.knotsV, data.degreeV, 40);
+                    const uS = getSamples(knotsU, degreeU, 40), vS = getSamples(knotsV, degreeV, 40);
                     const geom = new THREE.BufferGeometry();
                     const verts = [], uvs = [], idxs = [];
                     const target = new THREE.Vector3();
@@ -239,7 +245,7 @@ export class Viewer3D {
                     for (let j = 0; j < numV; j++) {
                         const pts = []; for (let i = 0; i < numU; i++) {
                             const idx = (j * numU + i) * stride;
-                            pts.push(new THREE.Vector3(data.controlPoints[idx], data.controlPoints[idx+1], data.controlPoints[idx+2]));
+                            pts.push(new THREE.Vector3(rawCPs[idx], rawCPs[idx+1], rawCPs[idx+2]));
                         }
                         sGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), pMat));
                     }
