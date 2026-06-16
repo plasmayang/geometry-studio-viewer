@@ -187,9 +187,14 @@ export class Viewer3D {
                     let numPts;
                     if (data.knots && data.knots.length > 0) {
                         curveKnots = Array.from(data.knots);
-                        let m = 1;
-                        while (curveKnots.length > 2 && curveKnots[curveKnots.length - 1] === curveKnots[curveKnots.length - 1 - m]) m++;
-                        if (m > p + 1) curveKnots.length -= (m - (p + 1));
+                        let mFront = 1;
+                        while (curveKnots.length > 2 && curveKnots[0] === curveKnots[mFront]) mFront++;
+                        if (mFront > p + 1) curveKnots.splice(0, mFront - (p + 1));
+
+                        let mBack = 1;
+                        while (curveKnots.length > 2 && curveKnots[curveKnots.length - 1] === curveKnots[curveKnots.length - 1 - mBack]) mBack++;
+                        if (mBack > p + 1) curveKnots.length -= (mBack - (p + 1));
+                        
                         numPts = curveKnots.length - p - 1;
                     } else {
                         numPts = isFlatObj ? (rawCPs.length / 3) : Math.floor(rawCPs.length / 3);
@@ -245,9 +250,13 @@ export class Viewer3D {
 
                     const sanitizeKnots = (knots, degree) => {
                         let ks = Array.from(knots);
-                        let m = 1;
-                        while (ks.length > 2 && ks[ks.length - 1] === ks[ks.length - 1 - m]) m++;
-                        if (m > degree + 1) ks.length -= (m - (degree + 1));
+                        let mFront = 1;
+                        while (ks.length > 2 && ks[0] === ks[mFront]) mFront++;
+                        if (mFront > degree + 1) ks.splice(0, mFront - (degree + 1));
+                        
+                        let mBack = 1;
+                        while (ks.length > 2 && ks[ks.length - 1] === ks[ks.length - 1 - mBack]) mBack++;
+                        if (mBack > degree + 1) ks.length -= (mBack - (degree + 1));
                         return ks;
                     };
 
