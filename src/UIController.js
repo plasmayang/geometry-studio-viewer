@@ -38,16 +38,6 @@ export class UIController {
             title: 'Visual Test Gallery (Dynamic)',
         });
 
-        const caseOptions = {};
-        callbacks.manifest.forEach(item => {
-            caseOptions[item.name] = item.file;
-        });
-
-        galleryFolder.addBinding(this.params, 'case', {
-            label: 'Select Case',
-            options: caseOptions
-        }).on('change', (ev) => callbacks.onCaseChange(ev.value));
-
         const displayFolder = this.pane.addFolder({
             title: 'Visuals',
         });
