@@ -2,21 +2,31 @@
   {
     "file": "generated_cases/variational_fairing.json",
     "id": "variational_fairing",
-    "name": "Fairing ON: Variational Smoothing"
+    "name": "Fairing ON: Variational Smoothing",
+    "tags": ["profile:closed", "profile:isomorphic", "guide:single", "constraint:C0", "scheme:variational", "archive"]
   },
   {
     "file": "generated_cases/mutation_sharp.json",
     "id": "mutation_sharp",
-    "name": "Mutation: Circle to Square (Sharp)"
+    "name": "Mutation: Circle to Square (Sharp)",
+    "tags": ["profile:closed", "profile:heterogeneous", "topology:isolated-singularity", "guide:none", "scheme:analytic-cp", "archive"]
   },
   {
     "file": "generated_cases/catia_coupling.json",
     "id": "catia_coupling",
-    "name": "CATIA Coupling: Tangency Alignment"
+    "name": "CATIA Coupling: Tangency Alignment",
+    "tags": ["profile:closed", "profile:isomorphic", "topology:g0-singularity", "guide:none", "scheme:analytic-cp", "archive"]
   },
   {
     "file": "generated_cases/mutation_data_driven.json",
     "id": "mutation_data_driven",
-    "name": "Data-Driven Circle-Square"
+    "name": "Data-Driven Circle-Square",
+    "tags": ["profile:closed", "profile:heterogeneous", "topology:isolated-singularity", "guide:none", "scheme:analytic-cp", "archive"]
+  },
+  {
+    "file": "generated_cases/multi_guide_open.json",
+    "id": "multi_guide_open",
+    "name": "Multi-Guide Open Section Lofting",
+    "tags": ["profile:open", "profile:multi", "guide:multi", "constraint:C0", "scheme:variational"]
   }
 ]
