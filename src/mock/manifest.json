@@ -28,5 +28,11 @@
     "id": "multi_guide_open",
     "name": "Multi-Guide Open Section Lofting",
     "tags": ["profile:open", "profile:multi", "guide:multi", "constraint:C0", "scheme:variational"]
+  },
+  {
+    "file": "generated_cases/hybrid_rational_mutation.json",
+    "id": "hybrid_rational_mutation",
+    "name": "Hybrid Rational-NonRational Mutation",
+    "tags": ["profile:closed", "profile:heterogeneous", "topology:degree-elevation", "guide:none", "scheme:analytic-cp"]
   }
 ]

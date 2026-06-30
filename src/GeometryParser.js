@@ -42,9 +42,12 @@ export class GeometryParser {
     }
 
     static parseNurbs(jsonData) {
-        if (jsonData.surface || jsonData.curves) {
+        if (jsonData.surface || jsonData.curves || jsonData.support_surfaces) {
+            const surfaces = [];
+            if (jsonData.surface) surfaces.push(jsonData.surface);
+            if (jsonData.support_surfaces) surfaces.push(...jsonData.support_surfaces);
             return { 
-                surfaces: jsonData.surface ? [jsonData.surface] : [],
+                surfaces: surfaces,
                 curves: jsonData.curves || []
             };
         }
