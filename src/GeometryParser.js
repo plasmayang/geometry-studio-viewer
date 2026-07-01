@@ -45,7 +45,12 @@ export class GeometryParser {
         if (jsonData.surface || jsonData.curves || jsonData.support_surfaces) {
             const surfaces = [];
             if (jsonData.surface) surfaces.push(jsonData.surface);
-            if (jsonData.support_surfaces) surfaces.push(...jsonData.support_surfaces);
+            if (jsonData.support_surfaces) {
+                jsonData.support_surfaces.forEach(s => {
+                    s.label = 'Support Surface';
+                    surfaces.push(s);
+                });
+            }
             return { 
                 surfaces: surfaces,
                 curves: jsonData.curves || []

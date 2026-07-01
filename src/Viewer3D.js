@@ -228,7 +228,7 @@ export class Viewer3D {
         }
 
         if (nurbsData.surfaces) {
-            const schemeColors = { 'Analytic': 0xffaa00, 'Variational': 0x00aaff, 'Default': 0xffaa00 };
+            const schemeColors = { 'Analytic': 0xffaa00, 'Variational': 0x00aaff, 'Default': 0xffaa00, 'Support Surface': 0x8833ff };
             nurbsData.surfaces.forEach(data => {
                 try {
                     const label = data.label || 'Default';
@@ -318,7 +318,7 @@ export class Viewer3D {
                     geom.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
                     geom.computeVertexNormals();
 
-                    const mat = new THREE.MeshStandardMaterial({ color: schemeColors[label] || 0xffaa00, side: THREE.DoubleSide, metalness: 0.3, roughness: 0.4, transparent: true, opacity: label === 'Variational' ? 0.4 : 0.7 });
+                    const mat = new THREE.MeshStandardMaterial({ color: schemeColors[label] || 0xffaa00, side: THREE.DoubleSide, metalness: 0.3, roughness: 0.4, transparent: true, opacity: label === 'Variational' ? 0.4 : (label === 'Support Surface' ? 0.3 : 0.7) });
                     sGroup.add(new THREE.Mesh(geom, mat));
 
                     const pMat = new THREE.LineBasicMaterial({ color: schemeColors[label] || 0x999999, transparent: true, opacity: 0.2 });
