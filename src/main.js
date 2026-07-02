@@ -9,7 +9,7 @@ class App {
         this.ui = null;
         this.currentCase = null;
         this.manifest = [];
-        this.dataSourceBase = '/src/mock/data_source'; // Point directly to the gallery data
+        this.dataSourceBase = '/kernel-data'; // Served by vite.config.js kernel-data-bridge plugin
     }
 
     async init() {
@@ -28,13 +28,18 @@ class App {
         try {
             // 1. Fetch Manifest from current source
             const response = await fetch(`${this.dataSourceBase}/manifest.json`);
-            if (!response.ok) throw new Error(`Manifest not found at ${this.dataSourceBase}. Check path/symlink.`);
+            if (!response.ok) throw new Error(`Manifest not found at ${this.dataSourceBase}. Set KERNEL_VIEWER_DATA_ROOT or check that the gallery test has run.`);
             
-            const manifest = await response.json();
-            this.manifest = manifest;
-            
-            if (manifest.length > 0) {
-                this.currentCase = manifest[0].file;
+            const rawManifest = await response.json();
+            // Contract: kernel-app gallery test writes { cases: [...] };
+            // legacy / dev mock writes a bare array. Both are accepted here.
+            const items = Array.isArray(rawManifest)
+                ? rawManifest
+                : (Array.isArray(rawManifest?.cases) ? rawManifest.cases : []);
+            this.manifest = items.map(it => ({ tags: [], ...it }));
+
+            if (this.manifest.length > 0) {
+                this.currentCase = this.manifest[0].file;
             }
             
             this.renderCaseList('');
@@ -51,7 +56,7 @@ class App {
                 return;
             }
             this.ui = new UIController({
-                manifest: manifest,
+                manifest: this.manifest,
                 dataSource: this.dataSourceBase,
                 onCaseChange: (caseFile) => {
                     this.currentCase = caseFile;

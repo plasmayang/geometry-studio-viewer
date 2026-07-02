@@ -17,3 +17,8 @@ Thumbs.db
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Gallery test data bridge: data path is configured at runtime via
+# KERNEL_VIEWER_DATA_ROOT (see vite.config.js). No filesystem symlink should
+# ever live in this repo.
+src/mock/data_source
