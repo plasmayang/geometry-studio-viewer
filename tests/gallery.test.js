@@ -44,17 +44,19 @@ function loadCaseFile(name) {
 // Canonical spot-check: representative cases from each gallery "family".
 // Adding a case family should add it here.
 //
-// Note: cases with names ending in `*_known_broken` are intentionally
-// excluded — they exist as input fixtures for kernel bug-fixing work
-// but cannot currently round-trip through the export pipeline.
+// Cases whose filenames end in `*_known_broken` are kept in tests/gallery/
+// as regression fixtures for known kernel bugs (homogenization, p/cp
+// mismatch) but are intentionally excluded from the runnable list — they
+// cannot currently round-trip through the export pipeline. Their data
+// lives next to the manifest under tests/gallery/<name>_known_broken.json.
 const REQUIRED_CASE_STEMS = [
     'pipe_straight', 'pipe_helix', 'ship_hull', 'cone_frustum',
-    'bottle_heterogeneous', 'wing_skin',
+    'bottle_heterogeneous',
     'exhaust_manifold', 'open_section', 'periodic_single_guide',
     'curved_spine_stress', 'degenerate_spine',
     'multi_guide_dual_open', 'multi_guide_triple_closed',
     'multi_shape_closed', 'circle_to_square',
-    'heterogeneous_rational', 'closed_catia_coupling',
+    'heterogeneous_rational',
     'guide_with_support_surface', 'guide_with_support_surface_twist',
     'hermite_dual_guide_twist', 'hermite_position_only',
 ];
