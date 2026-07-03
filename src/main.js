@@ -202,12 +202,19 @@ class App {
             if (item.tags && item.tags.length > 0) {
                 html += `<div style="margin-top: 5px; display: flex; flex-wrap: wrap; gap: 4px;">`;
                 item.tags.forEach(tag => {
-                    // color code tags
+                    // Color by tag-prefix per tests/gallery/TAG_SCHEMA.md.
+                    // Each prefix group gets a stable color so reviewers can
+                    // scan the gallery list at a glance.
                     let color = '#757575';
-                    if (tag.startsWith('profile')) color = '#1976d2';
-                    if (tag.startsWith('guide') || tag.startsWith('constraint')) color = '#e65100';
-                    if (tag.startsWith('topology')) color = '#d32f2f';
-                    if (tag.startsWith('scheme')) color = '#7b1fa2';
+                    const prefix = tag.split(':')[0];
+                    if (prefix === 'profile') color = '#1976d2';
+                    else if (prefix === 'shape')   color = '#0288d1';
+                    else if (prefix === 'guide')   color = '#e65100';
+                    else if (prefix === 'continuity') color = '#f57c00';
+                    else if (prefix === 'scheme')  color = '#7b1fa2';
+                    else if (prefix === 'compatibility') color = '#5e35b1';
+                    else if (prefix === 'topology') color = '#d32f2f';
+                    else if (prefix === 'feature') color = '#00897b';
                     html += `<span style="font-size: 10px; padding: 2px 6px; border-radius: 10px; background-color: ${color}; color: white;">${tag}</span>`;
                 });
                 html += `</div>`;
