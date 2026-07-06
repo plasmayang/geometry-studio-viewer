@@ -186,15 +186,12 @@ export class Viewer3D {
                     let curveKnots;
                     let numPts;
                     if (data.knots && data.knots.length > 0) {
+                        // Use the knot vector AS-IS. The producer (kernel) emits valid
+                        // clamped NURBS knot vectors of the form
+                        //   [0]*p ⊕ internal ⊕ [1]*p
+                        // matching numCPs + degree + 1. THREE.js's NURBSCurve handles
+                        // clamped boundary multiplicity natively; do not strip it.
                         curveKnots = Array.from(data.knots);
-                        let mFront = 1;
-                        while (curveKnots.length > 2 && curveKnots[0] === curveKnots[mFront]) mFront++;
-                        if (mFront > p + 1) curveKnots.splice(0, mFront - (p + 1));
-
-                        let mBack = 1;
-                        while (curveKnots.length > 2 && curveKnots[curveKnots.length - 1] === curveKnots[curveKnots.length - 1 - mBack]) mBack++;
-                        if (mBack > p + 1) curveKnots.length -= (mBack - (p + 1));
-                        
                         numPts = curveKnots.length - p - 1;
                     } else {
                         numPts = isFlatObj ? (rawCPs.length / 3) : Math.floor(rawCPs.length / 3);
@@ -248,20 +245,11 @@ export class Viewer3D {
                         isFlatObj = true;
                     }
 
-                    const sanitizeKnots = (knots, degree) => {
-                        let ks = Array.from(knots);
-                        let mFront = 1;
-                        while (ks.length > 2 && ks[0] === ks[mFront]) mFront++;
-                        if (mFront > degree + 1) ks.splice(0, mFront - (degree + 1));
-                        
-                        let mBack = 1;
-                        while (ks.length > 2 && ks[ks.length - 1] === ks[ks.length - 1 - mBack]) mBack++;
-                        if (mBack > degree + 1) ks.length -= (mBack - (degree + 1));
-                        return ks;
-                    };
-
-                    const knotsU = sanitizeKnots(data.knotsU || data.knots_u, degreeU);
-                    const knotsV = sanitizeKnots(data.knotsV || data.knots_v, degreeV);
+                    // Use the knot vectors AS-IS. The producer (kernel) emits valid
+                    // clamped NURBS knot vectors. THREE.js's NURBSSurface handles
+                    // clamped boundary multiplicity natively; do not strip it.
+                    const knotsU = Array.from(data.knotsU || data.knots_u);
+                    const knotsV = Array.from(data.knotsV || data.knots_v);
 
                     const numU = knotsU.length - degreeU - 1;
                     const numV = knotsV.length - degreeV - 1;
