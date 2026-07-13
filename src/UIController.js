@@ -47,6 +47,11 @@ export class UIController {
             expanded: true
         });
 
+        this.curveFolder = this.pane.addFolder({
+            title: 'Curves',
+            expanded: false
+        });
+
         displayFolder.addBinding(this.params, 'wireframe', { label: 'Wireframe' })
             .on('change', (ev) => callbacks.onWireframeToggle(ev.value));
 
@@ -76,10 +81,20 @@ export class UIController {
     updateSurfaceToggles(surfaces, onToggle) {
         // Clear existing surface bindings
         this.surfaceFolder.children.forEach(c => c.dispose());
-        
+
         surfaces.forEach(label => {
             const params = { visible: true };
             this.surfaceFolder.addBinding(params, 'visible', {
+                label: label
+            }).on('change', (ev) => onToggle(label, ev.value));
+        });
+    }
+
+    updateCurveToggles(curves, onToggle) {
+        this.curveFolder.children.forEach(c => c.dispose());
+        curves.forEach(label => {
+            const params = { visible: true };
+            this.curveFolder.addBinding(params, 'visible', {
                 label: label
             }).on('change', (ev) => onToggle(label, ev.value));
         });

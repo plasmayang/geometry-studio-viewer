@@ -279,10 +279,13 @@ class App {
                 document.getElementById('case-description').innerHTML = infoHtml;
 
                 const { geometry, markers, nurbs } = GeometryParser.parseMesh(jsonData);
-                const surfaceLabels = this.viewer.loadMesh(geometry, markers, nurbs);
-                
+                const { surfaceLabels, curveLabels } = this.viewer.loadMesh(geometry, markers, nurbs);
+
                 this.ui.updateSurfaceToggles(surfaceLabels, (label, visible) => {
                     this.viewer.setSurfaceVisibility(label, visible);
+                });
+                this.ui.updateCurveToggles(curveLabels, (label, visible) => {
+                    this.viewer.setCurveVisibility(label, visible);
                 });
             }
         } catch (error) {

@@ -153,7 +153,7 @@ export class Viewer3D {
             this.controls.update();
         }
 
-        return labels;
+        return { surfaceLabels: labels, curveLabels: Object.keys(this.curveGroups || {}) };
     }
 
     addMarkers(markers) {
@@ -171,7 +171,13 @@ export class Viewer3D {
     addNurbs(nurbsData) {
         const labels = [];
         if (nurbsData.curves) {
+            this.curveGroups = {};
             nurbsData.curves.forEach(data => {
+                const curveLabel = data.label;
+                if (curveLabel) {
+                    this.curveGroups[curveLabel] = new THREE.Group();
+                    this.nurbsGroup.add(this.curveGroups[curveLabel]);
+                }
                 try {
                     const p = data.degree !== undefined ? data.degree : data.p;
                     let rawCPs = data.controlPoints || data.control_points;
@@ -222,7 +228,12 @@ export class Viewer3D {
                         : data.type === 'guide' ? 0xff00ff
                         : data.type === 'section_target' ? 0xff8800
                         : 0x008800;
-                    this.nurbsGroup.add(new THREE.Line(geometry, new THREE.LineBasicMaterial({ color, linewidth: 2 })));
+                    const line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color, linewidth: 2 }));
+                    if (curveLabel && this.curveGroups[curveLabel]) {
+                        this.curveGroups[curveLabel].add(line);
+                    } else {
+                        this.nurbsGroup.add(line);
+                    }
                 } catch (e) { console.error(e); }
             });
         }
@@ -345,6 +356,12 @@ export class Viewer3D {
 
     setSurfaceVisibility(label, visible) {
         if (this.surfaceGroups[label]) this.surfaceGroups[label].visible = visible;
+    }
+
+    setCurveVisibility(label, visible) {
+        if (this.curveGroups && this.curveGroups[label]) {
+            this.curveGroups[label].visible = visible;
+        }
     }
 
     setWireframe(enabled) { this.nurbsGroup.traverse(c => { if (c.material) c.material.wireframe = enabled; }); }
