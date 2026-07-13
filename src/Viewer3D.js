@@ -218,7 +218,10 @@ export class Viewer3D {
                         }
                     });
                     const geometry = new THREE.BufferGeometry().setFromPoints(pts);
-                    const color = data.type === 'section' ? 0x000000 : (data.type === 'guide' ? 0xff00ff : 0x008800);
+                    const color = data.type === 'section' ? 0x000000
+                        : data.type === 'guide' ? 0xff00ff
+                        : data.type === 'section_target' ? 0xff8800
+                        : 0x008800;
                     this.nurbsGroup.add(new THREE.Line(geometry, new THREE.LineBasicMaterial({ color, linewidth: 2 })));
                 } catch (e) { console.error(e); }
             });
