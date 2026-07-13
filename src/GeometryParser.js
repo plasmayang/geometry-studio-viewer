@@ -42,7 +42,7 @@ export class GeometryParser {
     }
 
     static parseNurbs(jsonData) {
-        if (jsonData.surface || jsonData.curves || jsonData.support_surfaces) {
+        if (jsonData.surface || jsonData.curves || jsonData.support_surfaces || jsonData.constraint_visualizations) {
             const surfaces = [];
             if (jsonData.surface) surfaces.push(jsonData.surface);
             if (jsonData.support_surfaces) {
@@ -51,7 +51,12 @@ export class GeometryParser {
                     surfaces.push(s);
                 });
             }
-            return { 
+            if (jsonData.constraint_visualizations) {
+                jsonData.constraint_visualizations.forEach(s => {
+                    surfaces.push(s);
+                });
+            }
+            return {
                 surfaces: surfaces,
                 curves: jsonData.curves || []
             };

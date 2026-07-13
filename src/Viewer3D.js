@@ -239,7 +239,17 @@ export class Viewer3D {
         }
 
         if (nurbsData.surfaces) {
-            const schemeColors = { 'Analytic': 0xffaa00, 'Variational': 0x00aaff, 'Default': 0xffaa00, 'Support Surface': 0x8833ff, 'Section Support Surface': 0x33aaff };
+            const schemeColors = {
+    'Analytic': 0xffaa00,
+    'Variational': 0x00aaff,
+    'Default': 0xffaa00,
+    'Support Surface': 0x8833ff,
+    'Section Support Surface': 0x33aaff,
+    'Section Constraint Viz support_surface': 0x33aaff,
+    'Section Constraint Viz tangent_disc': 0xff8800,
+    'Section Constraint Viz curvature_disc': 0xaa00ff,
+    'Section Constraint Viz torsion_disc': 0x00ffaa,
+};
             nurbsData.surfaces.forEach(data => {
                 try {
                     const label = data.label || 'Default';
