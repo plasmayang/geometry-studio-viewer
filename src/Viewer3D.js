@@ -225,7 +225,7 @@ export class Viewer3D {
         }
 
         if (nurbsData.surfaces) {
-            const schemeColors = { 'Analytic': 0xffaa00, 'Variational': 0x00aaff, 'Default': 0xffaa00, 'Support Surface': 0x8833ff };
+            const schemeColors = { 'Analytic': 0xffaa00, 'Variational': 0x00aaff, 'Default': 0xffaa00, 'Support Surface': 0x8833ff, 'Section Support Surface': 0x33aaff };
             nurbsData.surfaces.forEach(data => {
                 try {
                     const label = data.label || 'Default';
