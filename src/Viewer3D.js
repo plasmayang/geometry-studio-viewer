@@ -246,9 +246,9 @@ export class Viewer3D {
     'Support Surface': 0x8833ff,
     'Section Support Surface': 0x33aaff,
     'Section Constraint Viz support_surface': 0x33aaff,
-    'Section Constraint Viz tangent_disc': 0xff8800,
-    'Section Constraint Viz curvature_disc': 0xaa00ff,
-    'Section Constraint Viz torsion_disc': 0x00ffaa,
+    'Section Constraint Viz tangent_ribbon': 0xff8800,
+    'Section Constraint Viz curvature_ribbon': 0xaa00ff,
+    'Section Constraint Viz torsion_ribbon': 0x00ffaa,
 };
             nurbsData.surfaces.forEach(data => {
                 try {
