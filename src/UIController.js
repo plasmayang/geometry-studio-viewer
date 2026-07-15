@@ -43,7 +43,7 @@ export class UIController {
         });
 
         this.surfaceFolder = this.pane.addFolder({
-            title: 'Surfaces',
+            title: 'Lofted Surface (3 modes)',
             expanded: true
         });
 

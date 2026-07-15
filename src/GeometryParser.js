@@ -42,9 +42,16 @@ export class GeometryParser {
     }
 
     static parseNurbs(jsonData) {
-        if (jsonData.surface || jsonData.curves || jsonData.support_surfaces || jsonData.constraint_visualizations) {
+        if (jsonData.surfaces || jsonData.surface || jsonData.curves || jsonData.support_surfaces || jsonData.constraint_visualizations) {
             const surfaces = [];
-            if (jsonData.surface) surfaces.push(jsonData.surface);
+            // iter-review-25 §3.3.1: prefer the plural 'surfaces' array
+            // (one entry per SectionFrameMode/SubMode — FreeBlend3D,
+            // RigidTransport, Projection). Fall back to singular
+            // 'surface' for pre-iter-review-25 envelopes.
+            const surfaceStream = Array.isArray(jsonData.surfaces)
+                ? jsonData.surfaces
+                : (jsonData.surface ? [jsonData.surface] : []);
+            surfaceStream.forEach(s => surfaces.push(s));
             if (jsonData.support_surfaces) {
                 jsonData.support_surfaces.forEach(s => {
                     s.label = 'Support Surface';
