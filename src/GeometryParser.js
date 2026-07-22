@@ -46,7 +46,7 @@ export class GeometryParser {
             const surfaces = [];
             // iter-review-25 §3.3.1: prefer the plural 'surfaces' array
             // (one entry per SectionFrameMode/SubMode — FreeBlend3D,
-            // RigidTransport, Projection). Fall back to singular
+            // AffineTransport, Projection). Fall back to singular
             // 'surface' for pre-iter-review-25 envelopes.
             const surfaceStream = Array.isArray(jsonData.surfaces)
                 ? jsonData.surfaces
