@@ -26,8 +26,7 @@ import path from 'node:path';
 import process from 'node:process';
 
 // Built-in fallback when viewer.config.json is missing.
-// Matches the shipped viewer.config.json so the viewer still runs
-// out-of-the-box.
+// MUST stay in sync with viewer.config.json.
 const DEFAULT_CONFIG = Object.freeze({
     $schema_version: "1.0",
     active_profile: "gallery-tests",

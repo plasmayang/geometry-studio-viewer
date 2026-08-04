@@ -334,5 +334,3 @@ class App {
 
 const app = new App();
 app.init();
-
-export { app };
