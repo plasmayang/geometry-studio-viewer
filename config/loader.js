@@ -1,35 +1,27 @@
 // viewer.config loader.
 //
-// Single source of truth for the viewer's runtime configuration.
-// Both vite.config.js (build-time) and src/main.js (runtime fallback)
-// read from this.
+// The viewer runs in ONE of two modes at a time:
+//   - mode = "directory": read manifest from a configured filesystem
+//     directory. Each profile defines a data root + url_prefix.
+//   - mode = "protocol":  run a WebSocket server that accepts pushed
+//     data from app(s); broadcast to the connected browser viewer.
 //
-// Each profile carries BOTH:
-//   - server-side fields: data_root (filesystem path), url_prefix
-//   - browser-side fields: url_prefix, manifest_path, description
-// The vite plugin reads everything; the browser build strips
-// data_root before injection.
+// Mode is set at config load time. To switch modes, edit
+// viewer.config.json and restart the viewer (server + browser).
 //
-// Per-profile url_prefix means the vite plugin can register one
-// middleware per profile. Switching profile at runtime = switching
-// url_prefix; no server restart required.
-//
-// Usage (build-time, Node ESM):
-//
-//   import { getActiveProfile, getAllProfiles, getRuntimeConfig } from
-//     './config/loader.js';
-//   const all = getAllProfiles();  // for multi-middleware registration
-//   const runtime = getRuntimeConfig();  // for browser injection
+// Build-time use (vite.config.js exposes __VIEWER_CONFIG__ to the
+// browser). Runtime use (no further file reads needed).
 
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
 // Built-in fallback when viewer.config.json is missing.
-// MUST stay in sync with viewer.config.json.
+// MUST stay in sync with the shipped file.
 const DEFAULT_CONFIG = Object.freeze({
     $schema_version: "1.0",
-    active_profile: "gallery-tests",
+    mode: "directory",
+    profile: "gallery-tests",
     profiles: {
         "gallery-tests": {
             description: "Visualize kernel-app Gallery outputs via data directory.",
@@ -37,7 +29,13 @@ const DEFAULT_CONFIG = Object.freeze({
             manifest_path: "manifest.json",
             data_root: "../kernel-app/data",
         }
-    }
+    },
+    server: {
+        host: "127.0.0.1",
+        port: 8090,
+        ingest_path: "/ingest",
+        viewer_path: "/viewer",
+    },
 });
 
 let _cached = null;
@@ -68,52 +66,34 @@ export function loadViewerConfig(opts = {}) {
 }
 
 /**
- * Resolve data_root to an absolute path against the viewer root.
+ * Throw if `mode` is not one of the two supported values.
  */
-function _resolveDataRoot(root, profile) {
-    if (!profile.data_root) return null;
-    return path.isAbsolute(profile.data_root)
-        ? profile.data_root
-        : path.resolve(root, profile.data_root);
-}
-
-/**
- * Return the active profile (with absolute data_root resolved against
- * the viewer root). Throws if the active profile name does not exist
- * in the config.
- */
-export function getActiveProfile(opts = {}) {
-    const cfg = loadViewerConfig(opts);
-    return _materialize(cfg, cfg.active_profile, opts);
-}
-
-/**
- * Return ALL profiles (active_profile + all listed). Used by the vite
- * plugin to register one middleware per profile.
- */
-export function getAllProfiles(opts = {}) {
-    const cfg = loadViewerConfig(opts);
-    const viewerRoot = path.resolve(process.cwd());
-    const out = {};
-    for (const name of Object.keys(cfg.profiles || {})) {
-        try {
-            out[name] = _materialize(cfg, name, opts);
-        } catch (e) {
-            // Skip invalid profiles but continue with the rest.
-            console.warn(`[viewer-config] skipping profile '${name}': ${e.message}`);
-        }
+function _validateMode(cfg) {
+    if (cfg.mode !== "directory" && cfg.mode !== "protocol") {
+        throw new Error(
+            `[viewer-config] mode must be 'directory' or 'protocol', got ${cfg.mode!r}`);
     }
-    return out;
 }
 
-function _materialize(cfg, name, opts) {
-    const viewerRoot = path.resolve(process.cwd());
+/**
+ * Resolve the active directory-mode profile. Throws when mode is
+ * not 'directory' or the active profile is missing.
+ */
+export function getDirectoryProfile(opts = {}) {
+    const cfg = loadViewerConfig(opts);
+    _validateMode(cfg);
+    if (cfg.mode !== "directory") {
+        throw new Error(
+            `[viewer-config] getDirectoryProfile() called but mode=${cfg.mode!r}; expected 'directory'`);
+    }
+    const name = cfg.profile;
     const profile = cfg.profiles && cfg.profiles[name];
     if (!profile) {
         throw new Error(
-            `[viewer-config] profile '${name}' not found in profiles: ` +
+            `[viewer-config] active profile '${name}' not found in profiles: ` +
             (cfg.profiles ? Object.keys(cfg.profiles).join(', ') : '(none)'));
     }
+    const viewerRoot = path.resolve(process.cwd());
     return {
         name,
         description: profile.description || "",
@@ -125,25 +105,71 @@ function _materialize(cfg, name, opts) {
 }
 
 /**
+ * Resolve the protocol-mode server config. Throws when mode is
+ * not 'protocol'.
+ */
+export function getProtocolServerConfig(opts = {}) {
+    const cfg = loadViewerConfig(opts);
+    _validateMode(cfg);
+    if (cfg.mode !== "protocol") {
+        throw new Error(
+            `[viewer-config] getProtocolServerConfig() called but mode=${cfg.mode!r}; expected 'protocol'`);
+    }
+    const s = cfg.server || {};
+    return {
+        host: s.host || "127.0.0.1",
+        port: typeof s.port === "number" ? s.port : 8090,
+        ingest_path: s.ingest_path || "/ingest",
+        viewer_path: s.viewer_path || "/viewer",
+    };
+}
+
+/**
  * Return the JSON-shaped runtime config that the browser needs.
- * Strips data_root (server-only); includes all profile metadata so
- * the browser UI can build the profile picker.
+ * Strips server-only fields (data_root absolute paths).
+ *
+ * Shape depends on mode:
+ *   - directory: { mode, profile, profiles: { ... } }
+ *   - protocol:  { mode, server: { host, port, ingest_path, viewer_path } }
  */
 export function getRuntimeConfig(opts = {}) {
     const cfg = loadViewerConfig(opts);
-    const profiles = {};
-    for (const [name, p] of Object.entries(cfg.profiles || {})) {
-        profiles[name] = {
-            description: p.description || "",
-            url_prefix: p.url_prefix || "/kernel-data",
-            manifest_path: p.manifest_path || "manifest.json",
+    _validateMode(cfg);
+    if (cfg.mode === "directory") {
+        const profiles = {};
+        for (const [name, p] of Object.entries(cfg.profiles || {})) {
+            profiles[name] = {
+                description: p.description || "",
+                url_prefix: p.url_prefix || "/kernel-data",
+                manifest_path: p.manifest_path || "manifest.json",
+            };
+        }
+        return {
+            $schema_version: cfg.$schema_version || "1.0",
+            mode: "directory",
+            profile: cfg.profile,
+            profiles,
         };
     }
+    // mode === "protocol"
+    const s = cfg.server || {};
     return {
         $schema_version: cfg.$schema_version || "1.0",
-        active_profile: cfg.active_profile,
-        profiles,
+        mode: "protocol",
+        server: {
+            host: s.host || "127.0.0.1",
+            port: typeof s.port === "number" ? s.port : 8090,
+            ingest_path: s.ingest_path || "/ingest",
+            viewer_path: s.viewer_path || "/viewer",
+        },
     };
+}
+
+function _resolveDataRoot(root, profile) {
+    if (!profile.data_root) return null;
+    return path.isAbsolute(profile.data_root)
+        ? profile.data_root
+        : path.resolve(root, profile.data_root);
 }
 
 // Reset internal cache (tests only).

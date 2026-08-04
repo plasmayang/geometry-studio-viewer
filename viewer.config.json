@@ -1,6 +1,7 @@
 {
   "$schema_version": "1.0",
-  "active_profile": "gallery-tests",
+  "mode": "directory",
+  "profile": "gallery-tests",
   "profiles": {
     "gallery-tests": {
       "description": "Visualize kernel-app Gallery outputs via data directory.",
@@ -14,5 +15,11 @@
       "manifest_path": "manifest.json",
       "data_root": "./src/mock"
     }
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8090,
+    "ingest_path": "/ingest",
+    "viewer_path": "/viewer"
   }
 }
