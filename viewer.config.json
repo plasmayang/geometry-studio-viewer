@@ -1,6 +1,6 @@
 {
   "$schema_version": "1.0",
-  "mode": "protocol",
+  "mode": "directory",
   "profile": "gallery-tests",
   "profiles": {
     "gallery-tests": {
