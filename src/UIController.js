@@ -3,72 +3,98 @@ import { Pane } from 'tweakpane';
 export class UIController {
     constructor(callbacks) {
         this.callbacks = callbacks;
+        this.mode = callbacks.mode || 'directory';
 
         this.pane = new Pane({
             title: 'Geometry Studio',
             expanded: true,
         });
 
-        // Profiles exposed at build-time by vite.config.js.
-        const profiles = callbacks.profiles || {};
-        const activeProfileName = callbacks.activeProfileName
-            || Object.keys(profiles)[0] || null;
-        const activeProfile = activeProfileName ? profiles[activeProfileName] : null;
-
-        this.params = {
-            profile: activeProfileName,
-            dataSource: callbacks.dataSource,
-            wireframe: false,
-            showControlPolygon: true,
-            showNormals: false,
-            grid: true,
-            color: '#4488ff',
-        };
+        // Profile picker only makes sense in directory mode.
+        this.profileBinding = null;
+        this.dataSourceBinding = null;
+        if (this.mode === 'directory') {
+            const profiles = callbacks.profiles || {};
+            const activeProfileName = callbacks.activeProfileName
+                || Object.keys(profiles)[0] || null;
+            this.params = {
+                profile: activeProfileName,
+                dataSource: callbacks.dataSource,
+                wireframe: false,
+                showControlPolygon: true,
+                showNormals: false,
+                grid: true,
+                color: '#4488ff',
+            };
+        } else {
+            this.params = {
+                wireframe: false,
+                showControlPolygon: true,
+                showNormals: false,
+                grid: true,
+                color: '#4488ff',
+            };
+        }
 
         this.init(callbacks);
     }
 
     init(callbacks) {
-        const profiles = callbacks.profiles || {};
         const configFolder = this.pane.addFolder({
             title: 'Data Configuration',
             expanded: false
         });
 
-        // Profile picker: drives both url_prefix and source path.
-        if (Object.keys(profiles).length > 0) {
+        if (this.mode === 'directory') {
+            const profiles = callbacks.profiles || {};
             const profileOptions = Object.entries(profiles).map(([k, v]) => ({
                 text: `${k}${v.description ? '  ' + v.description : ''}`,
                 value: k,
             }));
-            this.profileBinding = configFolder.addBinding(this.params, 'profile', {
-                label: 'Profile',
-                options: profileOptions,
-            }).on('change', (ev) => {
-                const next = profiles[ev.value];
-                if (!next) return;
-                this.params.dataSource = next.url_prefix;
-                if (this.dataSourceBinding) this.dataSourceBinding.refresh();
-                if (this.profileBinding) this.profileBinding.refresh();
-                callbacks.onProfileChange(ev.value, next);
+            if (profileOptions.length > 0) {
+                this.profileBinding = configFolder.addBinding(this.params, 'profile', {
+                    label: 'Profile',
+                    options: profileOptions,
+                }).on('change', (ev) => {
+                    const next = profiles[ev.value];
+                    if (!next) return;
+                    this.params.dataSource = next.url_prefix;
+                    if (this.dataSourceBinding) this.dataSourceBinding.refresh();
+                    if (this.profileBinding) this.profileBinding.refresh();
+                    callbacks.onProfileChange(ev.value, next);
+                });
+            }
+            this.dataSourceBinding = configFolder.addBinding(this.params, 'dataSource', {
+                label: 'Source Path'
+            }).on('change', (ev) => callbacks.onSourceChange(ev.value));
+            configFolder.addButton({
+                title: 'Refresh Gallery',
+            }).on('click', () => callbacks.onSourceChange(this.params.dataSource));
+        } else {
+            // protocol-mode: show server URL + connection state
+            const server = callbacks.server || {};
+            this.serverParams = { url: `ws://${server.host}:${server.port}${server.viewer_path}` };
+            const urlBinding = configFolder.addBinding(this.serverParams, 'url', {
+                label: 'Server URL',
+                readonly: true,
             });
+            this.connectionStatus = { connected: false };
+            configFolder.addBinding(this.connectionStatus, 'connected', {
+                label: 'Connected',
+                readonly: true,
+            });
+            this.connectionStatusBinding = configFolder;
+            this.urlBinding = urlBinding;
+            this.connectionField = configFolder;
+            if (callbacks.protocolSource) {
+                const update = () => {
+                    this.connectionStatus.connected = callbacks.protocolSource.isConnected();
+                    this.connectionStatusBinding.refresh();
+                };
+                this._protocolStatusUpdate = update;
+                update();
+            }
         }
-
-        this.dataSourceBinding = configFolder.addBinding(this.params, 'dataSource', {
-            label: 'Source Path'
-        }).on('change', (ev) => callbacks.onSourceChange(ev.value));
-
-        configFolder.addButton({
-            title: 'Refresh Gallery',
-        }).on('click', () => callbacks.onSourceChange(this.params.dataSource));
-
-        const galleryFolder = this.pane.addFolder({
-            title: 'Visual Test Gallery (Dynamic)',
-        });
-
-        const displayFolder = this.pane.addFolder({
-            title: 'Visuals',
-        });
 
         this.surfaceFolder = this.pane.addFolder({
             title: 'Lofted Surface (3 modes)',
@@ -78,6 +104,10 @@ export class UIController {
         this.curveFolder = this.pane.addFolder({
             title: 'Curves',
             expanded: false
+        });
+
+        const displayFolder = this.pane.addFolder({
+            title: 'Visuals',
         });
 
         displayFolder.addBinding(this.params, 'wireframe', { label: 'Wireframe' })
@@ -104,6 +134,19 @@ export class UIController {
         }).on('click', () => {
             callbacks.onReload();
         });
+    }
+
+    /**
+     * Update the panel after the manifest has changed (e.g. profile
+     * switch in directory mode, or new case pushed in protocol mode).
+     * The actual case-list rendering is in src/main.js, which has
+     * direct access to App state. UIController only re-syncs the
+     * Tweakpane-side bindings (e.g. connection status).
+     */
+    updateManifest(manifest) {
+        if (this.mode === 'protocol' && this._protocolStatusUpdate) {
+            this._protocolStatusUpdate();
+        }
     }
 
     updateSurfaceToggles(surfaces, onToggle) {

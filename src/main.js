@@ -1,18 +1,15 @@
 import { Viewer3D } from './Viewer3D.js';
 import { GeometryParser } from './GeometryParser.js';
 import { UIController } from './UIController.js';
-import { STPImporter } from './STPImporter.js';
+import { ProtocolSource } from './data-sources/ProtocolSource.js';
 
-// Runtime config injected at build time by vite.config.js via the
-// `define` option. Vite replaces the bare identifier `__VIEWER_CONFIG__`
-// with the JSON string literal at build time, so we use it directly
-// (NOT as `window.__VIEWER_CONFIG__`, which would not be substituted).
-// Reflects all profiles defined in viewer.config.json (browser-visible
-// fields only: url_prefix, manifest_path, description). data_root is
-// server-only and is NOT exposed to the browser.
+// Runtime config injected at build time by vite.config.js. Vite's
+// `define` option replaces the bare identifier with the JSON string
+// literal, so we read it directly (NOT via window.__VIEWER_CONFIG__).
 const VIEWER_CONFIG = typeof __VIEWER_CONFIG__ !== 'undefined' ? __VIEWER_CONFIG__ : {
     $schema_version: '1.0',
-    active_profile: 'gallery-tests',
+    mode: 'directory',
+    profile: 'gallery-tests',
     profiles: {
         'gallery-tests': {
             description: 'Visualize kernel-app Gallery outputs via data directory.',
@@ -25,78 +22,65 @@ const VIEWER_CONFIG = typeof __VIEWER_CONFIG__ !== 'undefined' ? __VIEWER_CONFIG
 class App {
     constructor() {
         this.viewer = new Viewer3D();
-        this.ui = null;
-        this.currentCase = null;
-        this.manifest = [];
-        this.profiles = VIEWER_CONFIG.profiles || {};
-        this.activeProfile = VIEWER_CONFIG.active_profile
-            || Object.keys(this.profiles)[0]
-            || null;
-        // Default data source comes from the active profile; ?data= URL
-        // query param still overrides at runtime for ad-hoc sources.
-        this.dataSourceBase = (this.activeProfile && this.profiles[this.activeProfile]
-            && this.profiles[this.activeProfile].url_prefix)
-            || '/kernel-data';
+        this.mode = VIEWER_CONFIG.mode || 'directory';
+        this.manifest = [];                 // flat case list (mode-dependent shape)
+        this.currentCase = null;            // mode-specific reference
+        this.dataSourceBase = null;         // directory-mode only
+        this.protocolSource = null;         // protocol-mode only
+
+        if (this.mode === 'protocol') {
+            this.protocolSource = new ProtocolSource(
+                VIEWER_CONFIG.server,
+                (snapshot) => this._onProtocolUpdate(snapshot)
+            );
+        }
     }
 
     async init() {
         const container = document.getElementById('app');
         this.viewer.init(container);
-        // Load initially from default or URL param
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.has('data')) {
-            this.dataSourceBase = urlParams.get('data');
+        await this._initUI();
+        if (this.mode === 'directory') {
+            await this.refreshGallery();
+        } else {
+            this.protocolSource.start();
         }
-
-        await this.refreshGallery();
     }
 
-    async refreshGallery() {
-        try {
-            // 1. Fetch Manifest from current source
-            const response = await fetch(`${this.dataSourceBase}/manifest.json`);
-            if (!response.ok) throw new Error(`Manifest not found at ${this.dataSourceBase}. Set KERNEL_VIEWER_DATA_ROOT or check that the gallery test has run.`);
-            
-            const rawManifest = await response.json();
-            // Contract: kernel-app gallery test writes { cases: [...] };
-            // legacy / dev mock writes a bare array. Both are accepted here.
-            const items = Array.isArray(rawManifest)
-                ? rawManifest
-                : (Array.isArray(rawManifest?.cases) ? rawManifest.cases : []);
-            this.manifest = items.map(it => ({ tags: [], ...it }));
+    // ---- UI init (shared) -------------------------------------------------
 
-            if (this.manifest.length > 0) {
-                this.currentCase = this.manifest[0].file;
-            }
-            
-            this.renderCaseList('');
-            this.renderTagCloud();
-            
-            document.getElementById('tag-filter').addEventListener('input', (e) => {
-                this.renderCaseList(e.target.value.toLowerCase());
-                this.syncButtonsFromInput();
-            });
-
-            // (Re)init UI
-            if (this.ui) {
-                // Profile/source change shouldn't reload the page; refresh
-                // the manifest list in place (renderCaseList /
-                // renderTagCloud above already updated the DOM). The
-                // surface/curve toggles are repopulated by loadData().
-                if (this.currentCase) await this.loadData();
-                return;
+    async _initUI() {
+        const baseCallbacks = {
+            onWireframeToggle: (enabled) => this.viewer.setWireframe(enabled),
+            onControlPolygonToggle: (enabled) => this.viewer.setControlPolygon(enabled),
+            onNormalsToggle: (enabled) => this.viewer.showNormals(enabled),
+            onGridToggle: (enabled) => this.viewer.setGrid(enabled),
+            onColorChange: (color) => this.viewer.setMeshColor(color),
+            onReload: () => this.loadData(),
+        };
+        if (this.mode === 'directory') {
+            // directory-mode: existing UI
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.has('data')) {
+                this.dataSourceBase = urlParams.get('data');
+            } else {
+                const activeProfile = VIEWER_CONFIG.profile
+                    || Object.keys(VIEWER_CONFIG.profiles || {})[0]
+                    || null;
+                const p = activeProfile ? VIEWER_CONFIG.profiles[activeProfile] : null;
+                this.dataSourceBase = (p && p.url_prefix) || '/kernel-data';
             }
             this.ui = new UIController({
+                mode: 'directory',
                 manifest: this.manifest,
                 dataSource: this.dataSourceBase,
-                profiles: this.profiles,
-                activeProfileName: this.activeProfile,
+                profiles: VIEWER_CONFIG.profiles,
+                activeProfileName: VIEWER_CONFIG.profile,
                 onCaseChange: (caseFile) => {
-                    this.currentCase = caseFile;
+                    this.currentCase = { source: 'directory', file: caseFile };
                     this.loadData();
                 },
                 onProfileChange: (profileName, profile) => {
-                    this.activeProfile = profileName;
                     this.dataSourceBase = profile.url_prefix;
                     this.refreshGallery();
                 },
@@ -104,20 +88,159 @@ class App {
                     this.dataSourceBase = newPath;
                     this.refreshGallery();
                 },
-                onWireframeToggle: (enabled) => this.viewer.setWireframe(enabled),
-                onControlPolygonToggle: (enabled) => this.viewer.setControlPolygon(enabled),
-                onNormalsToggle: (enabled) => this.viewer.showNormals(enabled),
-                onGridToggle: (enabled) => this.viewer.setGrid(enabled),
-                onColorChange: (color) => this.viewer.setMeshColor(color),
-                onReload: () => this.loadData()
+                ...baseCallbacks,
             });
+        } else {
+            // protocol-mode: protocol-panel UI
+            this.ui = new UIController({
+                mode: 'protocol',
+                manifest: this.manifest,
+                server: VIEWER_CONFIG.server,
+                protocolSource: this.protocolSource,
+                onCaseChange: (caseRef) => {
+                    this.currentCase = { source: 'protocol', ...caseRef };
+                    this.loadData();
+                },
+                ...baseCallbacks,
+            });
+        }
+    }
 
+    // ---- directory mode: refresh manifest from disk -------------------
+
+    async refreshGallery() {
+        try {
+            const response = await fetch(`${this.dataSourceBase}/manifest.json`);
+            if (!response.ok) throw new Error(
+                `Manifest not found at ${this.dataSourceBase}. ` +
+                `Set active profile or check that the gallery test has run.`);
+            const rawManifest = await response.json();
+            const items = Array.isArray(rawManifest)
+                ? rawManifest
+                : (Array.isArray(rawManifest?.cases) ? rawManifest.cases : []);
+            this.manifest = items.map(it => ({ tags: [], ...it }));
+
+            if (this.manifest.length > 0) {
+                this.currentCase = { source: 'directory', file: this.manifest[0].file };
+            }
+            this._renderManifest();
+            this._renderTagCloud();
+            this._wireFilterInput();
+            if (this.ui) this.ui.updateManifest(this.manifest);
             if (this.currentCase) await this.loadData();
-
         } catch (error) {
             console.error('Initialization Error:', error);
             this.showError(error.message);
         }
+    }
+
+    // ---- protocol mode: WS-driven update --------------------------------
+
+    _onProtocolUpdate(snapshot) {
+        // Flatten the snapshot into a single case list for the UI.
+        const items = [];
+        for (const app of snapshot.apps) {
+            for (const c of app.cases) {
+                items.push({ ...c, app_id: app.app_id, tags: c.tags || [] });
+            }
+        }
+        this.manifest = items;
+        if (this.ui) this.ui.updateManifest(items);
+        if (!this.currentCase && items.length > 0) {
+            this.currentCase = { source: 'protocol', app_id: items[0].app_id, file: items[0].file };
+            this.loadData();
+        }
+    }
+
+    // ---- shared: render a case to 3D viewport ---------------------------
+
+    async loadData() {
+        if (this.mode === 'directory') {
+            await this._loadDataDirectory();
+        } else {
+            await this._loadDataProtocol();
+        }
+    }
+
+    async _loadDataDirectory() {
+        if (!this.currentCase) return;
+        try {
+            const url = `${this.dataSourceBase}/${this.currentCase.file}`;
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`Failed to fetch case: ${this.currentCase.file}`);
+            const jsonData = await response.json();
+            this._renderCaseIntoViewport(jsonData, this.currentCase.file);
+        } catch (error) {
+            console.error('Error loading directory data:', error);
+        }
+    }
+
+    async _loadDataProtocol() {
+        if (!this.currentCase) return;
+        const app = this.protocolSource.snapshot.apps
+            .find(a => a.app_id === this.currentCase.app_id);
+        if (!app) return;
+        const c = app.cases.find(x => x.file === this.currentCase.file);
+        if (!c) return;
+        // Case payload already carries the full case JSON (validated by
+        // protocol_v1 contract). Render directly.
+        this._renderCaseIntoViewport(c.case, c.file);
+    }
+
+    _renderCaseIntoViewport(jsonData, sourceLabel) {
+        const isSTP = sourceLabel && (sourceLabel.toLowerCase().endsWith('.stp')
+            || sourceLabel.toLowerCase().endsWith('.step'));
+        if (isSTP) {
+            // STP files aren't pushed over the protocol; only kept for
+            // directory mode. (server.js can ignore this branch.)
+            return;
+        }
+        console.log('Case Loaded:', jsonData.caseName);
+
+        document.getElementById('case-title').innerText = jsonData.caseName || jsonData.name || 'Untitled Case';
+
+        let infoHtml = `<div style="margin-bottom: 10px; border-bottom: 1px solid #eee; padding-bottom: 5px;"><strong>Summary:</strong><br/>${jsonData.description || 'N/A'}</div>`;
+        if (jsonData.tags) {
+            infoHtml += `<div style="margin-bottom: 10px;"><strong>Tags:</strong><br/><span style="font-size: 11px;">${jsonData.tags.join(', ')}</span></div>`;
+        }
+        infoHtml += `<div style="margin-bottom: 10px;"><strong>Intent Space:</strong><br/><span style="font-family: monospace; font-size: 11px; white-space: pre-wrap;">${jsonData.intent_space || 'N/A'}</span></div>`;
+        infoHtml += `<div><strong>Success Criteria:</strong><br/><span style="color: #2e7d32;">${jsonData.success_criteria || 'N/A'}</span></div>`;
+
+        document.getElementById('case-description').innerHTML = infoHtml;
+
+        const { geometry, markers, nurbs } = GeometryParser.parseMesh(jsonData);
+        const { surfaceLabels, curveLabels } = this.viewer.loadMesh(geometry, markers, nurbs);
+
+        if (this.ui) {
+            this.ui.updateSurfaceToggles(surfaceLabels, (label, visible) => {
+                this.viewer.setSurfaceVisibility(label, visible);
+            });
+            this.ui.updateCurveToggles(curveLabels, (label, visible) => {
+                this.viewer.setCurveVisibility(label, visible);
+            });
+        }
+    }
+
+    // ---- directory-only: tag cloud + case list + filter input --------
+
+    _renderManifest() {
+        // Render via UIController (mode=directory keeps the
+        // legacy DOM rendering as a fallback / dev convenience).
+        this.renderCaseList('');
+    }
+
+    _renderTagCloud() {
+        this.renderTagCloud();
+    }
+
+    _wireFilterInput() {
+        const input = document.getElementById('tag-filter');
+        if (!input || input._wired) return;
+        input._wired = true;
+        input.addEventListener('input', (e) => {
+            this.renderCaseList(e.target.value.toLowerCase());
+            this.syncButtonsFromInput();
+        });
     }
 
     renderTagCloud() {
@@ -125,8 +248,8 @@ class App {
         this.manifest.forEach(item => {
             if (item.tags) item.tags.forEach(t => allTags.add(t));
         });
-        
         const tagCloud = document.getElementById('tag-cloud');
+        if (!tagCloud) return;
         tagCloud.innerHTML = '';
         Array.from(allTags).sort().forEach(tag => {
             const btn = document.createElement('button');
@@ -141,7 +264,6 @@ class App {
             btn.style.backgroundColor = '#f0f0f0';
             btn.style.color = '#333';
             btn.style.transition = 'all 0.2s';
-            
             btn.onclick = () => {
                 let state = parseInt(btn.dataset.state);
                 state = (state + 1) % 3;
@@ -156,21 +278,19 @@ class App {
     updateFilterFromButtons() {
         const btns = document.querySelectorAll('#tag-cloud button');
         const input = document.getElementById('tag-filter');
+        if (!input) return;
         const currentTerms = input.value.toLowerCase().split(/\s+/).filter(t => t.length > 0);
-        
         const allTagsList = Array.from(btns).map(b => b.dataset.tag);
         let newTerms = currentTerms.filter(t => {
             const tCore = t.startsWith('-') ? t.substring(1) : t;
             return !allTagsList.includes(tCore);
         });
-        
         btns.forEach(btn => {
             const state = parseInt(btn.dataset.state);
             const tag = btn.dataset.tag;
             if (state === 1) newTerms.push(tag);
             else if (state === 2) newTerms.push('-' + tag);
         });
-        
         input.value = newTerms.join(' ');
         this.renderCaseList(input.value.toLowerCase());
         this.syncButtonsFromInput();
@@ -178,8 +298,8 @@ class App {
 
     syncButtonsFromInput() {
         const input = document.getElementById('tag-filter');
+        if (!input) return;
         const terms = input.value.toLowerCase().split(/\s+/).filter(t => t.length > 0);
-        
         const btns = document.querySelectorAll('#tag-cloud button');
         btns.forEach(btn => {
             const tag = btn.dataset.tag;
@@ -204,45 +324,41 @@ class App {
 
     renderCaseList(filterText) {
         const listDiv = document.getElementById('case-list');
+        if (!listDiv) return;
         listDiv.innerHTML = '';
-        
         const terms = filterText ? filterText.toLowerCase().split(/\s+/).filter(t => t.length > 0) : [];
-        
         const filtered = this.manifest.filter(item => {
             if (terms.length === 0) return true;
-            
             for (const term of terms) {
                 if (term.startsWith('-')) {
                     const negTerm = term.substring(1);
                     if (negTerm.length === 0) continue;
                     const textMatch = item.name.toLowerCase().includes(negTerm);
                     const tagMatch = item.tags && item.tags.some(tag => tag.toLowerCase().includes(negTerm));
-                    if (textMatch || tagMatch) return false; // Exclude if negative term matches
+                    if (textMatch || tagMatch) return false;
                 } else {
                     const textMatch = item.name.toLowerCase().includes(term);
                     const tagMatch = item.tags && item.tags.some(tag => tag.toLowerCase().includes(term));
-                    if (!textMatch && !tagMatch) return false; // Require all positive terms to match
+                    if (!textMatch && !tagMatch) return false;
                 }
             }
             return true;
         });
-
         filtered.forEach(item => {
             const div = document.createElement('div');
             div.style.padding = '8px';
             div.style.marginBottom = '5px';
-            div.style.backgroundColor = this.currentCase === item.file ? '#e3f2fd' : '#fafafa';
-            div.style.border = this.currentCase === item.file ? '1px solid #90caf9' : '1px solid #ddd';
+            div.style.backgroundColor = (this.currentCase && this.currentCase.file === item.file) ? '#e3f2fd' : '#fafafa';
+            div.style.border = (this.currentCase && this.currentCase.file === item.file) ? '1px solid #90caf9' : '1px solid #ddd';
             div.style.borderRadius = '4px';
             div.style.cursor = 'pointer';
-            
             let html = `<div style="font-weight: bold; font-size: 13px; color: #333;">${item.name}</div>`;
+            if (this.mode === 'protocol' && item.app_id) {
+                html += `<div style="font-size: 10px; color: #666; margin-top: 2px;">app: ${item.app_id}</div>`;
+            }
             if (item.tags && item.tags.length > 0) {
                 html += `<div style="margin-top: 5px; display: flex; flex-wrap: wrap; gap: 4px;">`;
                 item.tags.forEach(tag => {
-                    // Color by tag-prefix per tests/gallery/TAG_SCHEMA.md.
-                    // Each prefix group gets a stable color so reviewers can
-                    // scan the gallery list at a glance.
                     let color = '#757575';
                     const prefix = tag.split(':')[0];
                     if (prefix === 'profile') color = '#1976d2';
@@ -258,76 +374,34 @@ class App {
                 html += `</div>`;
             }
             div.innerHTML = html;
-            
             div.onclick = () => {
-                this.currentCase = item.file;
-                this.renderCaseList(document.getElementById('tag-filter').value.toLowerCase()); // re-render to update selection style
+                if (this.currentCase && this.currentCase.file === item.file) return;
+                const ref = { source: this.mode, file: item.file };
+                if (this.mode === 'protocol') ref.app_id = item.app_id;
+                this.currentCase = ref;
+                this.renderCaseList(document.getElementById('tag-filter')?.value?.toLowerCase() || '');
                 this.loadData();
             };
-            
             listDiv.appendChild(div);
         });
     }
 
     showError(msg) {
         document.getElementById('case-title').innerText = 'Data Source Error';
-        document.getElementById('case-description').innerText = msg + '\n\nTry providing a path relative to the server root (e.g. /src/mock/data_source)';
-        
+        document.getElementById('case-description').innerText =
+            msg + '\n\nTry providing a path relative to the server root (e.g. /src/mock/data_source)';
+
         if (!this.ui) {
             this.ui = new UIController({
+                mode: this.mode,
                 manifest: [],
                 dataSource: this.dataSourceBase,
-                onSourceChange: (newPath) => {
-                    this.dataSourceBase = newPath;
-                    this.refreshGallery();
-                }
+                server: VIEWER_CONFIG.server,
+                protocolSource: this.protocolSource,
+                onCaseChange: () => {},
+                onProfileChange: () => {},
+                onSourceChange: () => {}
             });
-        }
-    }
-
-    async loadData() {
-        try {
-            const url = `${this.dataSourceBase}/${this.currentCase}`;
-            const response = await fetch(url);
-            if (!response.ok) throw new Error(`Failed to fetch case: ${this.currentCase}`);
-
-            const isSTP = this.currentCase.toLowerCase().endsWith('.stp')
-                       || this.currentCase.toLowerCase().endsWith('.step');
-
-            if (isSTP) {
-                const buffer = await response.arrayBuffer();
-                const parsed = STPImporter.parseBuffer(buffer);
-                const geometry = STPImporter.toBufferGeometry(parsed);
-                this.viewer.loadMesh(geometry, [], null);
-                document.getElementById('case-title').innerText = this.currentCase;
-                document.getElementById('case-description').innerText = 'STEP file loaded via STPImporter';
-            } else {
-                const jsonData = await response.json();
-                console.log('Case Loaded:', jsonData.caseName);
-                
-                document.getElementById('case-title').innerText = jsonData.caseName || jsonData.name || 'Untitled Case';
-                
-                let infoHtml = `<div style="margin-bottom: 10px; border-bottom: 1px solid #eee; padding-bottom: 5px;"><strong>Summary:</strong><br/>${jsonData.description || 'N/A'}</div>`;
-                if (jsonData.tags) {
-                    infoHtml += `<div style="margin-bottom: 10px;"><strong>Tags:</strong><br/><span style="font-size: 11px;">${jsonData.tags.join(', ')}</span></div>`;
-                }
-                infoHtml += `<div style="margin-bottom: 10px;"><strong>Intent Space:</strong><br/><span style="font-family: monospace; font-size: 11px; white-space: pre-wrap;">${jsonData.intent_space || 'N/A'}</span></div>`;
-                infoHtml += `<div><strong>Success Criteria:</strong><br/><span style="color: #2e7d32;">${jsonData.success_criteria || 'N/A'}</span></div>`;
-                
-                document.getElementById('case-description').innerHTML = infoHtml;
-
-                const { geometry, markers, nurbs } = GeometryParser.parseMesh(jsonData);
-                const { surfaceLabels, curveLabels } = this.viewer.loadMesh(geometry, markers, nurbs);
-
-                this.ui.updateSurfaceToggles(surfaceLabels, (label, visible) => {
-                    this.viewer.setSurfaceVisibility(label, visible);
-                });
-                this.ui.updateCurveToggles(curveLabels, (label, visible) => {
-                    this.viewer.setCurveVisibility(label, visible);
-                });
-            }
-        } catch (error) {
-            console.error('Error loading data:', error);
         }
     }
 }
