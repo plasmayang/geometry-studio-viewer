@@ -13,6 +13,9 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Intermediate files
+*.pyc
+
 # Log files
 npm-debug.log*
 yarn-debug.log*
