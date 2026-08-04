@@ -111,6 +111,16 @@ def optional_str(data: Any, *, key: str, path: str = "") -> str | None:
     return require_str(data, key=key, path=path)
 
 
+def require_dict(data: Any, *, key: str, path: str = "") -> dict:
+    """Extract data[key] and verify it is a Mapping (object)."""
+    value = require(data, key=key, path=path)
+    if not isinstance(value, Mapping):
+        raise ContractError.at(path,
+            f"'{key}' must be object, got {type(value).__name__}",
+            code="TYPE_ERROR")
+    return value
+
+
 def optional_dict(data: Any, *, key: str, path: str = "") -> dict | None:
     if key not in data:
         return None

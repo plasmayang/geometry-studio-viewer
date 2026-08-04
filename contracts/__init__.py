@@ -31,13 +31,16 @@ The viewer consumes this contract by:
 from ._errors import ContractError
 from .manifest_v1 import validate_manifest_v1, MANIFEST_V1
 from .case_v1 import validate_case_v1, CASE_V1
+from .protocol_v1 import validate_message_v1, PROTOCOL_V1
 
 __all__ = [
     "ContractError",
     "validate_manifest_v1",
     "validate_case_v1",
+    "validate_message_v1",
     "MANIFEST_V1",
     "CASE_V1",
+    "PROTOCOL_V1",
 ]
 
 # Schema version that this contract package implements.
