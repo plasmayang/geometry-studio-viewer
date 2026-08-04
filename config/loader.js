@@ -71,7 +71,7 @@ export function loadViewerConfig(opts = {}) {
 function _validateMode(cfg) {
     if (cfg.mode !== "directory" && cfg.mode !== "protocol") {
         throw new Error(
-            `[viewer-config] mode must be 'directory' or 'protocol', got ${cfg.mode!r}`);
+            `[viewer-config] mode must be 'directory' or 'protocol', got ${JSON.stringify(cfg.mode)}`);
     }
 }
 
@@ -84,7 +84,7 @@ export function getDirectoryProfile(opts = {}) {
     _validateMode(cfg);
     if (cfg.mode !== "directory") {
         throw new Error(
-            `[viewer-config] getDirectoryProfile() called but mode=${cfg.mode!r}; expected 'directory'`);
+            `[viewer-config] getDirectoryProfile() called but mode=${JSON.stringify(cfg.mode)}; expected 'directory'`);
     }
     const name = cfg.profile;
     const profile = cfg.profiles && cfg.profiles[name];
@@ -113,7 +113,7 @@ export function getProtocolServerConfig(opts = {}) {
     _validateMode(cfg);
     if (cfg.mode !== "protocol") {
         throw new Error(
-            `[viewer-config] getProtocolServerConfig() called but mode=${cfg.mode!r}; expected 'protocol'`);
+            `[viewer-config] getProtocolServerConfig() called but mode=${JSON.stringify(cfg.mode)}; expected 'protocol'`);
     }
     const s = cfg.server || {};
     return {
