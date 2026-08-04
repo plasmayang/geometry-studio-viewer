@@ -1,0 +1,14 @@
+{
+  "name": "kernel-gallery-viewer-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WebSocket server that accepts pushed case data from kernel-app (and any other app) and broadcasts to the browser viewer.",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
