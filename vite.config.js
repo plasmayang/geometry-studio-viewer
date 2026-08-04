@@ -2,20 +2,49 @@ import { defineConfig } from 'vite';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { getAllProfiles, getRuntimeConfig } from './config/loader.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Default: gallery test data root (sibling of viewer/).
-// Override at launch time: `KERNEL_VIEWER_DATA_ROOT=/some/path npm run dev`
-const DEFAULT_DATA_ROOT = path.resolve(__dirname, '../kernel-app/data');
-const DATA_ROOT = process.env.KERNEL_VIEWER_DATA_ROOT || DEFAULT_DATA_ROOT;
-const DATA_URL_PREFIX = '/kernel-data';
+// All configured profiles. The vite plugin registers one middleware
+// per profile, so profile switching at runtime is just an URL change.
+const profiles = getAllProfiles();
+const runtimeConfig = getRuntimeConfig();
 
 // Path-traversal guard: resolved file must stay under DATA_ROOT.
 function isUnderRoot(candidate, root) {
     const rel = path.relative(root, candidate);
     return rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+// Shared handler factory. Each profile gets one of these bound to its
+// own (url_prefix, data_root) pair.
+function makeDataBridge(profile) {
+    return function dataBridge(req, res, next) {
+        const urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
+        const target = path.normalize(path.join(profile.data_root, urlPath));
+
+        if (!isUnderRoot(target, profile.data_root)) {
+            res.statusCode = 403;
+            res.end('Forbidden: path escapes data root');
+            return;
+        }
+
+        fs.stat(target, (err, stat) => {
+            if (err || !stat.isFile()) {
+                res.statusCode = 404;
+                res.end(`Not found: ${urlPath}`);
+                return;
+            }
+            if (target.endsWith('.json')) {
+                res.setHeader('Content-Type', 'application/json');
+                // Disable caching so live gallery-test writes show up on reload.
+                res.setHeader('Cache-Control', 'no-store');
+            }
+            fs.createReadStream(target).pipe(res);
+        });
+    };
 }
 
 export default defineConfig({
@@ -25,49 +54,36 @@ export default defineConfig({
         fs: {
             allow: [
                 path.resolve(__dirname),
-                DATA_ROOT
+                ...Object.values(profiles).map(p => p.data_root)
             ]
         }
     },
     build: {
         outDir: 'dist'
     },
+    // Expose the runtime config to the browser so src/main.js can
+    // default to the active profile and src/UIController.js can build
+    // the profile picker. data_root is stripped; browser sees only
+    // url_prefix + manifest_path + description.
+    define: {
+        '__VIEWER_CONFIG__': JSON.stringify(runtimeConfig)
+    },
     plugins: [
         {
             name: 'kernel-data-bridge',
             configureServer(server) {
-                if (!fs.existsSync(DATA_ROOT)) {
-                    console.warn(
-                        `[kernel-data-bridge] data root does not exist: ${DATA_ROOT}\n` +
-                        `  Set KERNEL_VIEWER_DATA_ROOT or create the directory.`
-                    );
-                    return;
-                }
-
-                server.middlewares.use(DATA_URL_PREFIX, (req, res, next) => {
-                    const urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
-                    const target = path.normalize(path.join(DATA_ROOT, urlPath));
-
-                    if (!isUnderRoot(target, DATA_ROOT)) {
-                        res.statusCode = 403;
-                        res.end('Forbidden: path escapes data root');
-                        return;
+                console.info(`[kernel-data-bridge] registered ${Object.keys(profiles).length} profiles:`);
+                for (const [name, p] of Object.entries(profiles)) {
+                    if (!fs.existsSync(p.data_root)) {
+                        console.warn(
+                            `  [${name}] data_root does not exist: ${p.data_root}\n` +
+                            `    Run kernel-app Gallery or pick a different profile.`
+                        );
+                        continue;
                     }
-
-                    fs.stat(target, (err, stat) => {
-                        if (err || !stat.isFile()) {
-                            res.statusCode = 404;
-                            res.end(`Not found: ${urlPath}`);
-                            return;
-                        }
-                        if (target.endsWith('.json')) {
-                            res.setHeader('Content-Type', 'application/json');
-                            // Disable caching so live gallery-test writes show up on reload.
-                            res.setHeader('Cache-Control', 'no-store');
-                        }
-                        fs.createReadStream(target).pipe(res);
-                    });
-                });
+                    server.middlewares.use(p.url_prefix, makeDataBridge(p));
+                    console.info(`  [${name}] ${p.url_prefix} -> ${p.data_root}`);
+                }
             }
         }
     ]

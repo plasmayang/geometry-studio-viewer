@@ -2,13 +2,21 @@ import { Pane } from 'tweakpane';
 
 export class UIController {
     constructor(callbacks) {
+        this.callbacks = callbacks;
+
         this.pane = new Pane({
             title: 'Geometry Studio',
             expanded: true,
         });
 
+        // Profiles exposed at build-time by vite.config.js.
+        const profiles = callbacks.profiles || {};
+        const activeProfileName = callbacks.activeProfileName
+            || Object.keys(profiles)[0] || null;
+        const activeProfile = activeProfileName ? profiles[activeProfileName] : null;
+
         this.params = {
-            case: callbacks.manifest.length > 0 ? callbacks.manifest[0].file : '',
+            profile: activeProfileName,
             dataSource: callbacks.dataSource,
             wireframe: false,
             showControlPolygon: true,
@@ -21,12 +29,32 @@ export class UIController {
     }
 
     init(callbacks) {
+        const profiles = callbacks.profiles || {};
         const configFolder = this.pane.addFolder({
             title: 'Data Configuration',
             expanded: false
         });
 
-        configFolder.addBinding(this.params, 'dataSource', {
+        // Profile picker: drives both url_prefix and source path.
+        if (Object.keys(profiles).length > 0) {
+            const profileOptions = Object.entries(profiles).map(([k, v]) => ({
+                text: `${k}${v.description ? '  ' + v.description : ''}`,
+                value: k,
+            }));
+            this.profileBinding = configFolder.addBinding(this.params, 'profile', {
+                label: 'Profile',
+                options: profileOptions,
+            }).on('change', (ev) => {
+                const next = profiles[ev.value];
+                if (!next) return;
+                this.params.dataSource = next.url_prefix;
+                if (this.dataSourceBinding) this.dataSourceBinding.refresh();
+                if (this.profileBinding) this.profileBinding.refresh();
+                callbacks.onProfileChange(ev.value, next);
+            });
+        }
+
+        this.dataSourceBinding = configFolder.addBinding(this.params, 'dataSource', {
             label: 'Source Path'
         }).on('change', (ev) => callbacks.onSourceChange(ev.value));
 

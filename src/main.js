@@ -3,13 +3,40 @@ import { GeometryParser } from './GeometryParser.js';
 import { UIController } from './UIController.js';
 import { STPImporter } from './STPImporter.js';
 
+// Runtime config injected at build time by vite.config.js via the
+// `define` option. Vite replaces the bare identifier `__VIEWER_CONFIG__`
+// with the JSON string literal at build time, so we use it directly
+// (NOT as `window.__VIEWER_CONFIG__`, which would not be substituted).
+// Reflects all profiles defined in viewer.config.json (browser-visible
+// fields only: url_prefix, manifest_path, description). data_root is
+// server-only and is NOT exposed to the browser.
+const VIEWER_CONFIG = typeof __VIEWER_CONFIG__ !== 'undefined' ? __VIEWER_CONFIG__ : {
+    $schema_version: '1.0',
+    active_profile: 'gallery-tests',
+    profiles: {
+        'gallery-tests': {
+            description: 'Visualize kernel-app Gallery outputs via data directory.',
+            url_prefix: '/kernel-data',
+            manifest_path: 'manifest.json'
+        }
+    }
+};
+
 class App {
     constructor() {
         this.viewer = new Viewer3D();
         this.ui = null;
         this.currentCase = null;
         this.manifest = [];
-        this.dataSourceBase = '/kernel-data'; // Served by vite.config.js kernel-data-bridge plugin
+        this.profiles = VIEWER_CONFIG.profiles || {};
+        this.activeProfile = VIEWER_CONFIG.active_profile
+            || Object.keys(this.profiles)[0]
+            || null;
+        // Default data source comes from the active profile; ?data= URL
+        // query param still overrides at runtime for ad-hoc sources.
+        this.dataSourceBase = (this.activeProfile && this.profiles[this.activeProfile]
+            && this.profiles[this.activeProfile].url_prefix)
+            || '/kernel-data';
     }
 
     async init() {
@@ -52,15 +79,26 @@ class App {
 
             // (Re)init UI
             if (this.ui) {
-                window.location.reload();
+                // Profile/source change shouldn't reload the page; refresh
+                // the manifest list in place (renderCaseList /
+                // renderTagCloud above already updated the DOM). The
+                // surface/curve toggles are repopulated by loadData().
+                if (this.currentCase) await this.loadData();
                 return;
             }
             this.ui = new UIController({
                 manifest: this.manifest,
                 dataSource: this.dataSourceBase,
+                profiles: this.profiles,
+                activeProfileName: this.activeProfile,
                 onCaseChange: (caseFile) => {
                     this.currentCase = caseFile;
                     this.loadData();
+                },
+                onProfileChange: (profileName, profile) => {
+                    this.activeProfile = profileName;
+                    this.dataSourceBase = profile.url_prefix;
+                    this.refreshGallery();
                 },
                 onSourceChange: (newPath) => {
                     this.dataSourceBase = newPath;
