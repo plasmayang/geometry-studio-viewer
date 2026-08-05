@@ -275,6 +275,28 @@ export class Viewer3D {
                     const knotsU = Array.from(data.knotsU || data.knots_u);
                     const knotsV = Array.from(data.knotsV || data.knots_v);
 
+                    // Guard: skip surfaces with empty/malformed data.
+                    // The kernel (M4 scheme) emits surfaces with empty
+                    // knotsU / knotsV / controlPoints when the scheme
+                    // fails (SurfaceType::mark_error() sentinel,
+                    // grid_rows = -2). Without this guard, NURBSSurface
+                    // computes numU = knotsU.length - degreeU - 1 = -4
+                    // and its internal calcSurfacePoint throws
+                    // "Cannot read properties of undefined (reading '-4')".
+                    if (knotsU.length === 0 || knotsV.length === 0
+                        || !rawCPs || rawCPs.length === 0
+                        || knotsU.length < degreeU + 1
+                        || knotsV.length < degreeV + 1) {
+                        console.warn(
+                            `Viewer3D: skipping NURBS surface '${label}' — `
+                            + `empty/malformed data (knotsU.length=${knotsU.length}, `
+                            + `knotsV.length=${knotsV.length}, degreeU=${degreeU}, `
+                            + `degreeV=${degreeV}, rawCPs.length=${rawCPs ? rawCPs.length : 0}). `
+                            + `Likely the kernel M4 scheme returned mark_error().`
+                        );
+                        return;
+                    }
+
                     const numU = knotsU.length - degreeU - 1;
                     const numV = knotsV.length - degreeV - 1;
                     
