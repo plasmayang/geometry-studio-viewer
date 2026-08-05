@@ -45,8 +45,8 @@ export class GeometryParser {
         if (jsonData.surfaces || jsonData.surface || jsonData.curves || jsonData.support_surfaces || jsonData.constraint_visualizations) {
             const surfaces = [];
             // iter-review-25 §3.3.1: prefer the plural 'surfaces' array
-            // (one entry per SectionFrameMode/SubMode — FreeBlend3D,
-            // AffineTransport, Projection). Fall back to singular
+            // (one entry per SectionMode selected by the 'section_mode' JSON key —
+            // FreeBlend3D or AffineTransport). Fall back to singular
             // 'surface' for pre-iter-review-25 envelopes.
             const surfaceStream = Array.isArray(jsonData.surfaces)
                 ? jsonData.surfaces
