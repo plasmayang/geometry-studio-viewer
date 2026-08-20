@@ -27,7 +27,7 @@ const DEFAULT_CONFIG = Object.freeze({
             description: "Visualize kernel-app Gallery outputs via data directory.",
             url_prefix: "/kernel-data",
             manifest_path: "manifest.json",
-            data_root: "../kernel-app/data",
+            data_root: "../../../30-data/kernel-app",
         }
     },
     server: {
