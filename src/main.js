@@ -191,8 +191,6 @@ class App {
         const isSTP = sourceLabel && (sourceLabel.toLowerCase().endsWith('.stp')
             || sourceLabel.toLowerCase().endsWith('.step'));
         if (isSTP) {
-            // STP files aren't pushed over the protocol; only kept for
-            // directory mode. (server.js can ignore this branch.)
             return;
         }
         console.log('Case Loaded:', jsonData.caseName);
@@ -208,8 +206,9 @@ class App {
 
         document.getElementById('case-description').innerHTML = infoHtml;
 
-        const { geometry, markers, nurbs } = GeometryParser.parseMesh(jsonData);
-        const { surfaceLabels, curveLabels } = this.viewer.loadMesh(geometry, markers, nurbs);
+        const { geometry, markers, nurbs, audit } = GeometryParser.parseMesh(jsonData);
+        const { surfaceLabels, curveLabels, auditLayers } =
+            this.viewer.loadMesh(geometry, markers, nurbs, audit);
 
         if (this.ui) {
             this.ui.updateSurfaceToggles(surfaceLabels, (label, visible) => {
@@ -217,6 +216,9 @@ class App {
             });
             this.ui.updateCurveToggles(curveLabels, (label, visible) => {
                 this.viewer.setCurveVisibility(label, visible);
+            });
+            this.ui.updateAuditPanel(auditLayers, audit, (layerKey, visible) => {
+                this.viewer.setAuditLayer(layerKey, visible);
             });
         }
     }

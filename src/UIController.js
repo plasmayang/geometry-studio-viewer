@@ -1,4 +1,5 @@
 import { Pane } from 'tweakpane';
+import { AuditPanel } from './AuditPanel.js';
 
 export class UIController {
     constructor(callbacks) {
@@ -160,14 +161,28 @@ export class UIController {
             }).on('change', (ev) => onToggle(label, ev.value));
         });
     }
-
     updateCurveToggles(curves, onToggle) {
         this.curveFolder.children.forEach(c => c.dispose());
+
         curves.forEach(label => {
             const params = { visible: true };
             this.curveFolder.addBinding(params, 'visible', {
                 label: label
             }).on('change', (ev) => onToggle(label, ev.value));
+        });
+    }
+
+    /**
+     * Wire the v1.1 audit panel. If the case carries no
+     * process_audit / intermediate_products, show a single-line
+     * "v1.0 case — no audit data" placeholder so the reviewer knows
+     * the absence is meaningful (older producer), not a bug.
+     */
+    updateAuditPanel(layerKeys, audit, onToggleLayer) {
+        if (this.auditPanel) this.auditPanel.dispose();
+        this.auditPanel = new AuditPanel({
+            audit,
+            onToggleLayer: (layerKey, visible) => onToggleLayer(layerKey, visible),
         });
     }
 }

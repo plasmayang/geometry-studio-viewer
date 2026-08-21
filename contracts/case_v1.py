@@ -1,10 +1,10 @@
-"""Case contract v1.0.
+"""Case contract v1.0 / v1.1.
 
 A case file describes one gallery output: the input curves/surfaces
 that produced it, the expected metrics, and the resulting geometry
 (mesh + NURBS + debug markers).
 
-Required shape (top-level):
+Required shape (top-level, v1.0):
 {
   "schema_version": "1.0",
   "caseName": str,
@@ -24,6 +24,38 @@ Required shape (top-level):
   }
 }
 
+v1.1 EXTENSIONS (backward-compatible optional fields, added 2026-08-21):
+
+  "process_audit": {                  # Phase 0/8 attachment + bounds reports
+    "profile_attachment": [...],      # per-profile max_distance (sorted v)
+    "guide_attachment": [...],        # per-guide max_distance
+    "surface_bounds": {...},          # z_min/z_max/out_of_bounds_cps
+    "psi_kronecker_residual": number,  # max Kronecker residual over all bases
+    "psi_identity_residual": number   # max S_norm(u, v_m) vs profile_m(u) dist
+  }
+
+  "intermediate_products": {          # cp-propagation Phase 2-5 intermediates
+    "u_global_pre": [...],            # per-profile pre-alignment u-knot vectors
+    "u_global_post": [...],           # U_global post-alignment knot vector
+    "v_knots": [...],                 # final v-knot vector after Oslo algorithm
+    "v_stations": [...],              # profile v-station parameters
+    "psi_basis": {                    # sampled Ψ_m^{(d)}(v) curves
+        "v_grid": [...],               # sampling grid on v
+        "samples": [                   # one entry per (anchor, derivative)
+          {"anchor": int, "d": int, "values": [...]},
+          ...
+        ]
+    },
+    "s_norm_cp": {                    # 2D nominal manifold control points
+        "p_u": int, "p_v": int,
+        "knots_u": [...], "knots_v": [...],
+        "control_points": [...]        # flat [x,y,z,w, x,y,z,w, ...]
+    },
+    "chord_frames": [...],            # per v_station chord frame (origin, T, N, B)
+    "real_frames": [...],             # per v_station real frame (Wang-Jüttler RMF)
+    "tangent_residuals": [...]        # per profile CP: orthogonal rejection from spine tangent
+  }
+
 The validator checks structural integrity; it does NOT semantically
 verify the geometry (no continuity check, no closure check). That is
 the kernel's responsibility. The contract guarantees the data shape
@@ -42,6 +74,7 @@ from ._helpers import (
 
 
 CASE_V1 = "1.0"
+SUPPORTED_CASE_VERSIONS = frozenset({"1.0", "1.1"})
 
 VALID_GEOMETRY_TYPES = frozenset({
     "LoftedSurface",
@@ -68,9 +101,11 @@ def validate_case_v1(data: Any) -> None:
     """Raise ContractError on any violation. Returns None on success."""
 
     schema_version = require_str(data, key="schema_version")
-    if schema_version != CASE_V1:
+    if schema_version not in SUPPORTED_CASE_VERSIONS:
+        allowed = ", ".join(sorted(SUPPORTED_CASE_VERSIONS))
         raise ContractError(
-            f"case.schema_version must be {CASE_V1!r}, got {schema_version!r}",
+            f"case.schema_version must be one of [{allowed}], "
+            f"got {schema_version!r}",
             code="UNSUPPORTED_SCHEMA_VERSION")
 
     case_name = require_str(data, key="caseName")
@@ -123,6 +158,12 @@ def validate_case_v1(data: Any) -> None:
     _validate_mesh(geometry)
     _validate_nurbs(geometry)
     _validate_debug_markers(geometry)
+
+    # v1.1 extensions (optional, backward-compatible).
+    if "process_audit" in data:
+        _validate_process_audit(data["process_audit"])
+    if "intermediate_products" in data:
+        _validate_intermediate_products(data["intermediate_products"])
 
 
 def _validate_curve(c: Any, *, path: str) -> None:
@@ -285,3 +326,212 @@ def _validate_debug_markers(geometry: dict) -> None:
             raise ContractError.at("geometry.debugMarkers.singularities",
                 "must be list, got " + type(v).__name__,
                 code="TYPE_ERROR")
+
+
+# ===========================================================================
+# v1.1 extension validators
+# ===========================================================================
+
+def _validate_process_audit(pa: Any) -> None:
+    """Validate the process_audit block. All keys are optional; values
+    follow the report POD schema used by kernel-algo's diagnostics
+    layer (ProfileAdhesionReport / GuideAttachmentReport /
+    SurfaceBoundsReport)."""
+    if not isinstance(pa, dict):
+        raise ContractError.at("process_audit",
+            "must be object, got " + type(pa).__name__,
+            code="TYPE_ERROR")
+    if "profile_attachment" in pa:
+        for i, p in enumerate(require_list(pa, key="profile_attachment")):
+            _validate_adhesion_report(p, path=f"process_audit.profile_attachment[{i}]")
+    if "guide_attachment" in pa:
+        for i, g in enumerate(require_list(pa, key="guide_attachment")):
+            _validate_adhesion_report(g, path=f"process_audit.guide_attachment[{i}]")
+    if "surface_bounds" in pa:
+        _validate_surface_bounds(pa["surface_bounds"], path="process_audit.surface_bounds")
+    for key in ("psi_kronecker_residual", "psi_identity_residual"):
+        if key in pa:
+            v = pa[key]
+            if not isinstance(v, (int, float)) or isinstance(v, bool):
+                raise ContractError.at(f"process_audit.{key}",
+                    f"must be number, got {type(v).__name__}",
+                    code="TYPE_ERROR")
+            if v < 0:
+                raise ContractError.at(f"process_audit.{key}",
+                    f"must be non-negative, got {v}",
+                    code="VALUE_OUT_OF_RANGE")
+
+
+def _validate_adhesion_report(r: Any, *, path: str) -> None:
+    if not isinstance(r, dict):
+        raise ContractError.at(path,
+            f"expected object, got {type(r).__name__}",
+            code="TYPE_ERROR")
+    for k in ("profile_index", "guide_index"):
+        if k in r:
+            v = r[k]
+            if not isinstance(v, int) or isinstance(v, bool):
+                raise ContractError.at(f"{path}.{k}",
+                    f"must be integer, got {type(v).__name__}",
+                    code="TYPE_ERROR")
+    for k in ("v_param", "max_distance", "mean_distance", "t_at_max", "u_at_max"):
+        if k in r:
+            v = r[k]
+            if not isinstance(v, (int, float)) or isinstance(v, bool):
+                raise ContractError.at(f"{path}.{k}",
+                    f"must be number, got {type(v).__name__}",
+                    code="TYPE_ERROR")
+    if "per_sample_distances" in r:
+        v = r["per_sample_distances"]
+        if not isinstance(v, list):
+            raise ContractError.at(f"{path}.per_sample_distances",
+                f"must be list, got {type(v).__name__}",
+                code="TYPE_ERROR")
+
+
+def _validate_surface_bounds(b: Any, *, path: str) -> None:
+    if not isinstance(b, dict):
+        raise ContractError.at(path,
+            f"expected object, got {type(b).__name__}",
+            code="TYPE_ERROR")
+    for k in ("z_min", "z_max", "expected_z_lo", "expected_z_hi"):
+        if k in b:
+            v = b[k]
+            if not isinstance(v, (int, float)) or isinstance(v, bool):
+                raise ContractError.at(f"{path}.{k}",
+                    f"must be number, got {type(v).__name__}",
+                    code="TYPE_ERROR")
+    if "out_of_bounds_cps" in b:
+        v = b["out_of_bounds_cps"]
+        if not isinstance(v, int) or isinstance(v, bool):
+            raise ContractError.at(f"{path}.out_of_bounds_cps",
+                f"must be integer, got {type(v).__name__}",
+                code="TYPE_ERROR")
+
+
+def _validate_intermediate_products(ip: Any) -> None:
+    """Validate the intermediate_products block. All keys are optional;
+    each value is a flat array of numbers or a structured nested
+    object per the kernel-side dump layout."""
+    if not isinstance(ip, dict):
+        raise ContractError.at("intermediate_products",
+            "must be object, got " + type(ip).__name__,
+            code="TYPE_ERROR")
+    for arr_key in ("u_global_post", "v_knots",
+                    "v_stations", "tangent_residuals"):
+        if arr_key in ip:
+            _validate_number_array(ip[arr_key],
+                                   path=f"intermediate_products.{arr_key}")
+    if "u_global_pre" in ip:
+        _validate_knot_vector_list(ip["u_global_pre"],
+                                   path="intermediate_products.u_global_pre")
+    if "psi_basis" in ip:
+        _validate_psi_basis(ip["psi_basis"])
+    if "s_norm_cp" in ip:
+        _validate_s_norm_cp(ip["s_norm_cp"])
+    for frame_key in ("chord_frames", "real_frames"):
+        if frame_key in ip:
+            _validate_frame_list(ip[frame_key],
+                                 path=f"intermediate_products.{frame_key}")
+
+
+def _validate_number_array(arr: Any, *, path: str) -> None:
+    if not isinstance(arr, list):
+        raise ContractError.at(path,
+            f"must be list, got {type(arr).__name__}",
+            code="TYPE_ERROR")
+    for j, v in enumerate(arr):
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            raise ContractError.at(f"{path}[{j}]",
+                f"must be number, got {type(v).__name__}",
+                code="TYPE_ERROR")
+
+
+def _validate_knot_vector_list(arr: Any, *, path: str) -> None:
+    if not isinstance(arr, list):
+        raise ContractError.at(path,
+            f"must be list, got {type(arr).__name__}",
+            code="TYPE_ERROR")
+    for i, vec in enumerate(arr):
+        if not isinstance(vec, list):
+            raise ContractError.at(f"{path}[{i}]",
+                f"must be list of numbers, got {type(vec).__name__}",
+                code="TYPE_ERROR")
+        for j, v in enumerate(vec):
+            if not isinstance(v, (int, float)) or isinstance(v, bool):
+                raise ContractError.at(f"{path}[{i}][{j}]",
+                    f"must be number, got {type(v).__name__}",
+                    code="TYPE_ERROR")
+
+
+def _validate_psi_basis(pb: Any) -> None:
+    if not isinstance(pb, dict):
+        raise ContractError.at("intermediate_products.psi_basis",
+            "must be object, got " + type(pb).__name__,
+            code="TYPE_ERROR")
+    if "v_grid" in pb:
+        _validate_number_array(pb["v_grid"],
+                               path="intermediate_products.psi_basis.v_grid")
+    if "samples" in pb:
+        samples = pb["samples"]
+        if not isinstance(samples, list):
+            raise ContractError.at("intermediate_products.psi_basis.samples",
+                f"must be list, got {type(samples).__name__}",
+                code="TYPE_ERROR")
+        for i, s in enumerate(samples):
+            if not isinstance(s, dict):
+                raise ContractError.at(
+                    f"intermediate_products.psi_basis.samples[{i}]",
+                    f"must be object, got {type(s).__name__}",
+                    code="TYPE_ERROR")
+            for k in ("anchor", "d"):
+                if k in s and (not isinstance(s[k], int) or isinstance(s[k], bool)):
+                    raise ContractError.at(
+                        f"intermediate_products.psi_basis.samples[{i}].{k}",
+                        f"must be integer, got {type(s[k]).__name__}",
+                        code="TYPE_ERROR")
+            if "values" in s:
+                _validate_number_array(
+                    s["values"],
+                    path=f"intermediate_products.psi_basis.samples[{i}].values")
+
+
+def _validate_s_norm_cp(s: Any) -> None:
+    if not isinstance(s, dict):
+        raise ContractError.at("intermediate_products.s_norm_cp",
+            "must be object, got " + type(s).__name__,
+            code="TYPE_ERROR")
+    for k in ("p_u", "p_v"):
+        if k in s and (not isinstance(s[k], int) or isinstance(s[k], bool)):
+            raise ContractError.at(f"intermediate_products.s_norm_cp.{k}",
+                f"must be integer, got {type(s[k]).__name__}",
+                code="TYPE_ERROR")
+    for k in ("knots_u", "knots_v"):
+        if k in s:
+            _validate_number_array(s[k],
+                                   path=f"intermediate_products.s_norm_cp.{k}")
+    if "control_points" in s:
+        _validate_number_array(s["control_points"],
+                               path="intermediate_products.s_norm_cp.control_points")
+
+
+def _validate_frame_list(frames: Any, *, path: str) -> None:
+    if not isinstance(frames, list):
+        raise ContractError.at(path,
+            f"must be list, got {type(frames).__name__}",
+            code="TYPE_ERROR")
+    for i, f in enumerate(frames):
+        if not isinstance(f, dict):
+            raise ContractError.at(f"{path}[{i}]",
+                f"must be object, got {type(f).__name__}",
+                code="TYPE_ERROR")
+        for k in ("v_param", "origin", "tangent", "normal", "binormal"):
+            if k in f:
+                v = f[k]
+                if k == "v_param":
+                    if not isinstance(v, (int, float)) or isinstance(v, bool):
+                        raise ContractError.at(f"{path}[{i}].{k}",
+                            f"must be number, got {type(v).__name__}",
+                            code="TYPE_ERROR")
+                else:
+                    _validate_number_array(v, path=f"{path}[{i}].{k}")
