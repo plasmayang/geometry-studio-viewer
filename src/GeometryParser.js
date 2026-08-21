@@ -68,6 +68,22 @@ export class GeometryParser {
                     surfaces.push(s);
                 });
             }
+            // v1.1: synthesize the 2D nominal manifold s_norm^{2D}(u,v)
+            // (the cp-propagation §3.2 intermediate) as a regular surface
+            // entry so it shares the FreeBlend3D / AffineTransport toggle
+            // rail in UIController.updateSurfaceToggles().
+            if (jsonData.intermediate_products
+                && jsonData.intermediate_products.s_norm_cp) {
+                const s = jsonData.intermediate_products.s_norm_cp;
+                surfaces.push({
+                    label: 'NominalManifold',
+                    p_u: s.p_u,
+                    p_v: s.p_v,
+                    knots_u: s.knots_u,
+                    knots_v: s.knots_v,
+                    control_points: s.control_points,
+                });
+            }
             return {
                 surfaces: surfaces,
                 curves: jsonData.curves || []

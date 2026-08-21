@@ -1,9 +1,10 @@
 import { Pane } from 'tweakpane';
 
+// Audit-toggled overlays. The NominalManifold (cp-propagation §3.2
+// 2D nominal flow) is rendered as a regular surface and shares the
+// surface-toggle rail with FreeBlend3D / AffineTransport, so it does
+// NOT appear here.
 const AUDIT_LAYER_LABELS = {
-    frames:    'Chord vs Real Frames (per v_station)',
-    s_norm:    '2D Nominal Manifold s_norm^{2D}',
-    u_knots:   'U-knot Pre vs Post Alignment Overlay',
     heatmaps:  'Profile/Guide Attachment Heatmap',
 };
 

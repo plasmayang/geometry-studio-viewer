@@ -114,12 +114,10 @@ export class Viewer3D {
             labels.push(...surfaceLabels);
         }
 
-        // v1.1 audit data — applied before camera-fit so it informs the bbox.
-        if (audit && audit.intermediate) {
-            this._addAuditFrames(audit.intermediate);
-            this._addAuditSNorm(audit.intermediate);
-            this._addAuditUKnotOverlay(audit.intermediate);
-        }
+        // v1.1 audit data — only the heatmap layer survives here; the
+        // 2D nominal manifold is rendered as a regular surface (see
+        // GeometryParser.parseNurbs) so it shares the FreeBlend3D /
+        // AffineTransport toggle rail.
         if (audit && audit.process) {
             this._addAuditHeatmaps(audit.process);
         }
@@ -267,6 +265,7 @@ export class Viewer3D {
     'Section Constraint Viz tangent_ribbon': 0xff8800,
     'Section Constraint Viz curvature_ribbon': 0xaa00ff,
     'Section Constraint Viz torsion_ribbon': 0x00ffaa,
+    'NominalManifold': 0x00ff88,
 };
             nurbsData.surfaces.forEach(data => {
                 try {
@@ -358,7 +357,20 @@ export class Viewer3D {
                     geom.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
                     geom.computeVertexNormals();
 
-                    const mat = new THREE.MeshStandardMaterial({ color: schemeColors[label] || 0xffaa00, side: THREE.DoubleSide, metalness: 0.3, roughness: 0.4, transparent: true, opacity: label === 'Variational' ? 0.4 : (label === 'Support Surface' ? 0.3 : 0.7) });
+                    // NominalManifold is the 2D nominal-flow cp-propagation
+                    // §3.2 intermediate; render it semi-translucent with
+                    // depthWrite disabled so the underlying FreeBlend3D /
+                    // AffineTransport surfaces stay readable.
+                    const isNominal = label === 'NominalManifold';
+                    const mat = new THREE.MeshStandardMaterial({
+                        color: schemeColors[label] || 0xffaa00,
+                        side: THREE.DoubleSide,
+                        metalness: 0.3,
+                        roughness: 0.4,
+                        transparent: true,
+                        opacity: isNominal ? 0.25 : (label === 'Variational' ? 0.4 : (label === 'Support Surface' ? 0.3 : 0.7)),
+                        depthWrite: !isNominal,
+                    });
                     sGroup.add(new THREE.Mesh(geom, mat));
 
                     const pMat = new THREE.LineBasicMaterial({ color: schemeColors[label] || 0x999999, transparent: true, opacity: 0.2 });
@@ -391,171 +403,6 @@ export class Viewer3D {
     }
 
     // ---- v1.1 audit-data overlay renderers --------------------------------
-
-    // Per-v_station axis triples: chord frame (orange) vs real frame
-    // (blue). Visual diff shows where AffineTransport injected shear.
-    _addAuditFrames(ip) {
-        if (!ip) return;
-        const chord = ip.chord_frames;
-        const real = ip.real_frames;
-        if (!chord || !real) return;
-        if (chord.length !== real.length) return;
-        const group = new THREE.Group();
-        group.name = 'frames';
-        const axisLen = 0.5;
-        for (let i = 0; i < chord.length; ++i) {
-            const cf = chord[i];
-            const rf = real[i];
-            const origin = cf.origin;
-            if (!cf.tangent || !cf.normal || !cf.binormal) continue;
-            this._drawAxes(group, origin, cf.tangent, cf.normal, cf.binormal, axisLen, 0xff8800);
-            this._drawAxes(group, origin, rf.tangent, rf.normal, rf.binormal, axisLen, 0x0088ff);
-        }
-        this.auditGroup.add(group);
-        this.auditLayers['frames'] = group;
-    }
-
-    _drawAxes(parent, origin, t, n, b, length, color) {
-        const o = new THREE.Vector3(origin[0], origin[1], origin[2]);
-        const addArrow = (dir, hex) => {
-            const v = new THREE.Vector3(dir[0], dir[1], dir[2]);
-            const len = v.length();
-            if (len < 1e-9) return;
-            v.multiplyScalar(length / len);
-            const arrow = new THREE.ArrowHelper(
-                v.clone().normalize(),
-                o,
-                length,
-                hex,
-                length * 0.25,
-                length * 0.18
-            );
-            parent.add(arrow);
-        };
-        addArrow(t, color);
-        addArrow(n, color & 0x00ffff);
-        addArrow(b, color & 0xff00ff);
-    }
-
-    // Render the 2D nominal manifold s_norm^{2D}(u,v) as a thin
-    // semi-transparent ghost surface — this is the key intermediate
-    // showing the reviewer "what the loft would look like if every
-    // guide was disabled" so deviations from the final surface are
-    // immediately visible.
-    _addAuditSNorm(ip) {
-        if (!ip || !ip.s_norm_cp) return;
-        const s = ip.s_norm_cp;
-        if (!s.knots_u || !s.knots_v || !s.control_points) return;
-        const p_u = s.p_u || 3;
-        const p_v = s.p_v || 3;
-        const knotsU = Array.from(s.knots_u);
-        const knotsV = Array.from(s.knots_v);
-        const raw = s.control_points;
-        if (knotsU.length < p_u + 1 || knotsV.length < p_v + 1) return;
-        const stride = raw.length % 4 === 0 ? 4 : 3;
-        const numU = knotsU.length - p_u - 1;
-        const numV = knotsV.length - p_v - 1;
-        if (numU <= 0 || numV <= 0) return;
-        const controlPoints = [];
-        for (let i = 0; i < numU; i++) {
-            controlPoints[i] = [];
-            for (let j = 0; j < numV; j++) {
-                const idx = (j * numU + i) * stride;
-                controlPoints[i][j] = new THREE.Vector4(
-                    raw[idx], raw[idx + 1], raw[idx + 2],
-                    stride === 4 ? raw[idx + 3] : 1.0);
-            }
-        }
-        try {
-            const ns = new NURBSSurface(p_u, p_v, knotsU, knotsV, controlPoints);
-            const getSamples = (knots, p, steps) => {
-                const min = knots[p], max = knots[knots.length - p - 1], range = max - min;
-                let s = []; for (let i = 0; i <= steps; i++) s.push(i / steps);
-                for (let i = p; i < knots.length - p; i++) if (range > 0) s.push((knots[i] - min) / range);
-                s.sort((a, b) => a - b);
-                let u = [s[0]]; for (let i = 1; i < s.length; i++) if (s[i] - u[u.length - 1] > 1e-6) u.push(s[i]);
-                return u;
-            };
-            const uS = getSamples(knotsU, p_u, 30);
-            const vS = getSamples(knotsV, p_v, 30);
-            const geom = new THREE.BufferGeometry();
-            const verts = [];
-            const idxs = [];
-            const target = new THREE.Vector3();
-            for (let j = 0; j < vS.length; j++) {
-                for (let i = 0; i < uS.length; i++) {
-                    ns.getPoint(uS[i], vS[j], target);
-                    verts.push(target.x, target.y, target.z);
-                }
-            }
-            for (let j = 0; j < vS.length - 1; j++) {
-                for (let i = 0; i < uS.length - 1; i++) {
-                    const a = i + j * uS.length, b = i + 1 + j * uS.length,
-                          c = i + (j + 1) * uS.length, d = i + 1 + (j + 1) * uS.length;
-                    idxs.push(a, b, d, a, d, c);
-                }
-            }
-            geom.setIndex(idxs);
-            geom.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
-            geom.computeVertexNormals();
-            const mat = new THREE.MeshStandardMaterial({
-                color: 0x00ff88,
-                side: THREE.DoubleSide,
-                transparent: true,
-                opacity: 0.25,
-                wireframe: false,
-                depthWrite: false,
-            });
-            const grp = new THREE.Group();
-            grp.name = 's_norm';
-            grp.add(new THREE.Mesh(geom, mat));
-            this.auditGroup.add(grp);
-            this.auditLayers['s_norm'] = grp;
-        } catch (e) {
-            console.warn('Viewer3D: s_norm render failed:', e);
-        }
-    }
-
-    // Render u_knot overlay: vertical hairlines at each profile's
-    // pre-alignment internal knot positions, so reviewers can see
-    // where the alignment step merged the per-profile knot vectors.
-    _addAuditUKnotOverlay(ip) {
-        if (!ip) return;
-        const pre = ip.u_global_pre;
-        const post = ip.u_global_post;
-        if (!pre || pre.length === 0) return;
-        const grp = new THREE.Group();
-        grp.name = 'u_knots';
-        pre.forEach((profKnots) => {
-            if (!Array.isArray(profKnots) || profKnots.length < 4) return;
-            const internal = profKnots.slice(2, profKnots.length - 2);
-            internal.forEach(u => {
-                if (typeof u !== 'number') return;
-                const geom = new THREE.BufferGeometry();
-                geom.setAttribute('position', new THREE.Float32BufferAttribute([
-                    u, -0.05, -0.05,
-                    u,  0.05,  0.05,
-                ], 3));
-                const mat = new THREE.LineBasicMaterial({ color: 0x8844ff, transparent: true, opacity: 0.5 });
-                grp.add(new THREE.Line(geom, mat));
-            });
-        });
-        if (Array.isArray(post) && post.length >= 4) {
-            const internal = post.slice(2, post.length - 2);
-            internal.forEach(u => {
-                if (typeof u !== 'number') return;
-                const geom = new THREE.BufferGeometry();
-                geom.setAttribute('position', new THREE.Float32BufferAttribute([
-                    u, -0.08, -0.08,
-                    u,  0.08,  0.08,
-                ], 3));
-                const mat = new THREE.LineBasicMaterial({ color: 0x44ff44, transparent: true, opacity: 0.7 });
-                grp.add(new THREE.Line(geom, mat));
-            });
-        }
-        this.auditGroup.add(grp);
-        this.auditLayers['u_knots'] = grp;
-    }
 
     // Per-profile / per-guide deviation heatmap: color a small sphere
     // placed at each profile/guide position with a heat color
