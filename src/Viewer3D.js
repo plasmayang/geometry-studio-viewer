@@ -256,6 +256,8 @@ export class Viewer3D {
 
         if (nurbsData.surfaces) {
             const schemeColors = {
+    'FreeBlend3D': 0xffaa00,
+    'AffineTransport': 0x00aaff,
     'Analytic': 0xffaa00,
     'Variational': 0x00aaff,
     'Default': 0xffaa00,
