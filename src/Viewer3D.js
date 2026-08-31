@@ -259,6 +259,7 @@ export class Viewer3D {
     'Analytic': 0xffaa00,
     'Variational': 0x00aaff,
     'Default': 0xffaa00,
+    'VxLoft14': 0xffaa00,
     'Support Surface': 0x8833ff,
     'Section Support Surface': 0x33aaff,
     'Section Constraint Viz support_surface': 0x33aaff,
@@ -267,9 +268,11 @@ export class Viewer3D {
     'Section Constraint Viz torsion_ribbon': 0x00ffaa,
     'NominalManifold': 0x00ff88,
 };
-            nurbsData.surfaces.forEach(data => {
+            const piecePalette = [0xffaa00, 0x00aaff, 0x00ff88, 0xff5500, 0xaa00ff, 0x00ffaa];
+            nurbsData.surfaces.forEach((data, s_idx) => {
                 try {
                     const label = data.label || 'Default';
+                    const sColor = schemeColors[label] || piecePalette[s_idx % piecePalette.length];
                     labels.push(label);
                     const sGroup = new THREE.Group();
                     this.surfaceGroups[label] = sGroup;
@@ -363,7 +366,7 @@ export class Viewer3D {
                     // AffineTransport surfaces stay readable.
                     const isNominal = label === 'NominalManifold';
                     const mat = new THREE.MeshStandardMaterial({
-                        color: schemeColors[label] || 0xffaa00,
+                        color: sColor,
                         side: THREE.DoubleSide,
                         metalness: 0.3,
                         roughness: 0.4,
@@ -373,7 +376,7 @@ export class Viewer3D {
                     });
                     sGroup.add(new THREE.Mesh(geom, mat));
 
-                    const pMat = new THREE.LineBasicMaterial({ color: schemeColors[label] || 0x999999, transparent: true, opacity: 0.2 });
+                    const pMat = new THREE.LineBasicMaterial({ color: sColor, transparent: true, opacity: 0.2 });
                     for (let j = 0; j < numV; j++) {
                         const pts = []; for (let i = 0; i < numU; i++) {
                             const idx = (j * realNumU + i) * stride;
