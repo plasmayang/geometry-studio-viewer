@@ -176,7 +176,8 @@ export class UIController {
 
         surfaces.forEach(label => {
             const params = { visible: true };
-            this.surfaceFolder.addBinding(params, 'visible', {
+            const key = 'visible.' + label.replace(/[^A-Za-z0-9_]/g, '_');
+            this.surfaceFolder.addBinding(params, key, {
                 label: label
             }).on('change', (ev) => onToggle(label, ev.value));
         });
@@ -186,7 +187,8 @@ export class UIController {
 
         curves.forEach(label => {
             const params = { visible: true };
-            this.curveFolder.addBinding(params, 'visible', {
+            const key = 'visible.' + label.replace(/[^A-Za-z0-9_]/g, '_');
+            this.curveFolder.addBinding(params, key, {
                 label: label
             }).on('change', (ev) => onToggle(label, ev.value));
         });
