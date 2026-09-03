@@ -91,6 +91,11 @@ class App {
                     this.dataSourceBase = newPath;
                     this.refreshGallery();
                 },
+                onSectionModeChange: (mode, visible) => {
+                    if (this.viewer.surfaceGroups && this.viewer.surfaceGroups[mode]) {
+                        this.viewer.surfaceGroups[mode].visible = visible;
+                    }
+                },
                 ...baseCallbacks,
             });
         } else {

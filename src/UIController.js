@@ -97,6 +97,26 @@ export class UIController {
             }
         }
 
+        this.sectionModeFolder = this.pane.addFolder({
+            title: 'Section Mode',
+            expanded: true
+        });
+        this.sectionModeParams = { freeblend3d: true, affinetransport: true };
+        this.sectionModeFolder.addBinding(this.sectionModeParams, 'freeblend3d', {
+            label: 'FreeBlend3D visible'
+        }).on('change', (ev) => {
+            if (callbacks.onSectionModeChange) {
+                callbacks.onSectionModeChange('FreeBlend3D', ev.value);
+            }
+        });
+        this.sectionModeFolder.addBinding(this.sectionModeParams, 'affinetransport', {
+            label: 'AffineTransport visible'
+        }).on('change', (ev) => {
+            if (callbacks.onSectionModeChange) {
+                callbacks.onSectionModeChange('AffineTransport', ev.value);
+            }
+        });
+
         this.surfaceFolder = this.pane.addFolder({
             title: 'Lofted Surface (3 modes)',
             expanded: true
