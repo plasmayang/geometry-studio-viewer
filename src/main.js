@@ -26,6 +26,7 @@ class App {
         this.manifest = [];                 // flat case list (mode-dependent shape)
         this.currentCase = null;            // mode-specific reference
         this.dataSourceBase = null;         // directory-mode only
+        this.manifestPath = 'manifest.json';
         this.protocolSource = null;         // protocol-mode only
 
         if (this.mode === 'protocol') {
@@ -69,6 +70,7 @@ class App {
                     || null;
                 const p = activeProfile ? VIEWER_CONFIG.profiles[activeProfile] : null;
                 this.dataSourceBase = (p && p.url_prefix) || '/kernel-data';
+                this.manifestPath = (p && p.manifest_path) || 'manifest.json';
             }
             this.ui = new UIController({
                 mode: 'directory',
@@ -82,6 +84,7 @@ class App {
                 },
                 onProfileChange: (profileName, profile) => {
                     this.dataSourceBase = profile.url_prefix;
+                    this.manifestPath = profile.manifest_path || 'manifest.json';
                     this.refreshGallery();
                 },
                 onSourceChange: (newPath) => {
@@ -110,9 +113,9 @@ class App {
 
     async refreshGallery() {
         try {
-            const response = await fetch(`${this.dataSourceBase}/manifest.json`);
+            const response = await fetch(`${this.dataSourceBase}/${this.manifestPath}`);
             if (!response.ok) throw new Error(
-                `Manifest not found at ${this.dataSourceBase}. ` +
+                `Manifest not found at ${this.dataSourceBase}/${this.manifestPath}. ` +
                 `Set active profile or check that the gallery test has run.`);
             const rawManifest = await response.json();
             const items = Array.isArray(rawManifest)
