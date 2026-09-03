@@ -3,12 +3,12 @@
   "mode": "directory",
   "profile": "gallery-tests",
   "profiles": {
-    "gallery-tests": {
-      "description": "Visualize kernel-app Gallery outputs via data directory.",
-      "url_prefix": "/kernel-data",
-      "manifest_path": "manifest.json",
-      "data_root": "../../../30-data/kernel-app"
-    },
+"gallery-tests": {
+            "description": "Visualize kernel-app Gallery outputs via data directory.",
+            "url_prefix": "/kernel-data",
+            "manifest_path": "gallery_outputs/manifest.json",
+            "data_root": "../../../30-data/kernel-app"
+        },
     "mock-demo": {
       "description": "Read built-in mock fixtures (no kernel-app dependency).",
       "url_prefix": "/mock-data",
