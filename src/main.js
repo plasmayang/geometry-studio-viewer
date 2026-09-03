@@ -28,6 +28,7 @@ class App {
         this.dataSourceBase = null;         // directory-mode only
         this.manifestPath = 'manifest.json';
         this.protocolSource = null;         // protocol-mode only
+        this.caseNameFilter = '';           // user-typed case-name substring (CJK-safe)
 
         if (this.mode === 'protocol') {
             this.protocolSource = new ProtocolSource(
@@ -134,6 +135,7 @@ class App {
             this._renderManifest();
             this._renderTagCloud();
             this._wireFilterInput();
+            this._wireCaseNameFilter();
             if (this.ui) this.ui.updateManifest(this.manifest);
             if (this.currentCase) await this.loadData();
         } catch (error) {
@@ -253,6 +255,38 @@ class App {
         });
     }
 
+    /**
+     * Wire the dedicated case-name search box. Combined with the tag
+     * filter via AND inside renderCaseList — both must pass for a case
+     * to appear.
+     */
+    _wireCaseNameFilter() {
+        const input = document.getElementById('case-name-filter');
+        const clearBtn = document.getElementById('case-name-filter-clear');
+        if (!input || input._wired) return;
+        input._wired = true;
+
+        const apply = (value) => {
+            this.caseNameFilter = value || '';
+            this.renderCaseList(
+                document.getElementById('tag-filter')?.value?.toLowerCase() || ''
+            );
+        };
+
+        input.addEventListener('input', (e) => {
+            apply(e.target.value);
+        });
+
+        if (clearBtn && !clearBtn._wired) {
+            clearBtn._wired = true;
+            clearBtn.addEventListener('click', () => {
+                input.value = '';
+                apply('');
+                input.focus();
+            });
+        }
+    }
+
     renderTagCloud() {
         const allTags = new Set();
         this.manifest.forEach(item => {
@@ -356,10 +390,20 @@ class App {
         const listDiv = document.getElementById('case-list');
         if (!listDiv) return;
         listDiv.innerHTML = '';
+        const total = this.manifest.length;
         const countEl = document.getElementById('case-list-count');
-        if (countEl) countEl.textContent = String(this.manifest.length);
+        const totalEl = document.getElementById('case-list-total');
+        const emptyEl = document.getElementById('case-name-filter-empty');
+        const nameFilter = (this.caseNameFilter || '').toLowerCase().trim();
         const terms = filterText ? filterText.toLowerCase().split(/\s+/).filter(t => t.length > 0) : [];
+
+        const passesName = (item) => {
+            if (nameFilter.length === 0) return true;
+            return (item.name || '').toLowerCase().includes(nameFilter);
+        };
+
         const filtered = this.manifest.filter(item => {
+            if (!passesName(item)) return false;
             if (terms.length === 0) return true;
             for (const term of terms) {
                 if (term.startsWith('-')) {
@@ -376,6 +420,10 @@ class App {
             }
             return true;
         });
+
+        if (countEl) countEl.textContent = String(filtered.length);
+        if (totalEl) totalEl.textContent = String(total);
+        if (emptyEl) emptyEl.style.display = filtered.length === 0 ? 'inline' : 'none';
         filtered.forEach(item => {
             const div = document.createElement('div');
             div.style.padding = '8px';
