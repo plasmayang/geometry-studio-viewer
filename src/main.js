@@ -351,6 +351,8 @@ class App {
         const listDiv = document.getElementById('case-list');
         if (!listDiv) return;
         listDiv.innerHTML = '';
+        const countEl = document.getElementById('case-list-count');
+        if (countEl) countEl.textContent = String(this.manifest.length);
         const terms = filterText ? filterText.toLowerCase().split(/\s+/).filter(t => t.length > 0) : [];
         const filtered = this.manifest.filter(item => {
             if (terms.length === 0) return true;

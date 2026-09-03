@@ -55,7 +55,11 @@
             <span id="tag-cloud-chevron" style="transition: transform 0.2s;">▶</span>
         </div>
         <div id="tag-cloud" style="margin-bottom: 10px; display: none; flex-wrap: wrap; gap: 5px;"></div>
-        <div id="case-list" style="margin-bottom: 15px; min-height: 100px; max-height: 200px; overflow-y: auto; border: 1px solid #eee; padding: 5px; border-radius: 4px; background: #fff;">
+        <div id="case-list-header" style="display: flex; align-items: center; justify-content: space-between; padding: 4px 6px; margin-bottom: 4px; font-size: 12px; color: #555;">
+            <span><strong>Cases</strong> (<span id="case-list-count">0</span>)</span>
+            <span style="font-size: 10px; color: #888;">scroll ↕</span>
+        </div>
+        <div id="case-list" style="margin-bottom: 15px; min-height: 100px; flex: 1; max-height: 50vh; overflow-y: auto; border: 1px solid #eee; padding: 5px; border-radius: 4px; background: #fff;">
             <!-- list of cases will go here -->
         </div>
         <div id="case-description" style="margin: 0; font-size: 13px; line-height: 1.4; color: #4a4a4a; overflow-y: auto;">Loading gallery data...</div>
