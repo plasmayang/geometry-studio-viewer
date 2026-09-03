@@ -176,7 +176,10 @@ export class UIController {
 
         surfaces.forEach(label => {
             const params = { visible: true };
-            const key = 'visible.' + label.replace(/[^A-Za-z0-9_]/g, '_');
+            // Keep the key dot-free: Tweakpane v4 reads `params[key]` and
+            // a dot is treated as a nested path which throws _TpError for
+            // a primitive value at the parent.
+            const key = label.replace(/[^A-Za-z0-9_]/g, '_');
             this.surfaceFolder.addBinding(params, key, {
                 label: label
             }).on('change', (ev) => onToggle(label, ev.value));
@@ -187,8 +190,8 @@ export class UIController {
 
         curves.forEach(label => {
             const params = { visible: true };
-            const key = 'visible.' + label.replace(/[^A-Za-z0-9_]/g, '_');
-            this.curveFolder.addBinding(params, key, {
+            const key = label.replace(/[^A-Za-z0-9_]/g, '_');
+            this.surfaceFolder.addBinding(params, key, {
                 label: label
             }).on('change', (ev) => onToggle(label, ev.value));
         });
