@@ -270,11 +270,18 @@ export class Viewer3D {
     'Section Constraint Viz torsion_ribbon': 0x00ffaa,
     'NominalManifold': 0x00ff88,
 };
+            function colorForLabel(label) {
+                if (schemeColors[label] !== undefined) return schemeColors[label];
+                if (label.startsWith('Guide Support Surface #')) return 0x8833ff;
+                if (label.startsWith('Section Continuity Support #')) return 0x33aaff;
+                if (label.startsWith('Loose Section Support #')) return 0x4488cc;
+                return null;
+            }
             const piecePalette = [0xffaa00, 0x00aaff, 0x00ff88, 0xff5500, 0xaa00ff, 0x00ffaa];
             nurbsData.surfaces.forEach((data, s_idx) => {
                 try {
                     const label = data.label || 'Default';
-                    const sColor = schemeColors[label] || piecePalette[s_idx % piecePalette.length];
+                    const sColor = colorForLabel(label) ?? piecePalette[s_idx % piecePalette.length];
                     labels.push(label);
                     const sGroup = new THREE.Group();
                     this.surfaceGroups[label] = sGroup;

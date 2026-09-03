@@ -59,7 +59,6 @@ export class GeometryParser {
             surfaceStream.forEach(s => surfaces.push(s));
             if (jsonData.support_surfaces) {
                 jsonData.support_surfaces.forEach(s => {
-                    s.label = 'Support Surface';
                     surfaces.push(s);
                 });
             }
