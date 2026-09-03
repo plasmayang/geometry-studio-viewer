@@ -253,7 +253,8 @@ class App {
         const tagCloud = document.getElementById('tag-cloud');
         if (!tagCloud) return;
         tagCloud.innerHTML = '';
-        Array.from(allTags).sort().forEach(tag => {
+        const sortedTags = Array.from(allTags).sort();
+        sortedTags.forEach(tag => {
             const btn = document.createElement('button');
             btn.dataset.tag = tag;
             btn.innerText = tag;
@@ -274,7 +275,26 @@ class App {
             };
             tagCloud.appendChild(btn);
         });
+        const countEl = document.getElementById('tag-cloud-count');
+        if (countEl) countEl.textContent = String(sortedTags.length);
+        this._wireTagCloudToggle();
         this.syncButtonsFromInput();
+    }
+
+    _wireTagCloudToggle() {
+        const header = document.getElementById('tag-cloud-header');
+        if (!header || header._wired) return;
+        header._wired = true;
+        header.addEventListener('click', () => this._toggleTagCloud());
+    }
+
+    _toggleTagCloud() {
+        const tagCloud = document.getElementById('tag-cloud');
+        const chevron = document.getElementById('tag-cloud-chevron');
+        if (!tagCloud || !chevron) return;
+        const expanded = tagCloud.style.display !== 'none';
+        tagCloud.style.display = expanded ? 'none' : 'flex';
+        chevron.style.transform = expanded ? 'rotate(0deg)' : 'rotate(90deg)';
     }
 
     updateFilterFromButtons() {
