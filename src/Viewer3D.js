@@ -121,9 +121,17 @@ export class Viewer3D {
         if (audit && audit.process) {
             this._addAuditHeatmaps(audit.process);
         }
+        // v1.2 coupling overlay: straight lines for every coupling kind
+        // emitted by loft14::inspect::extract_coupling_relationships.
+        if (audit && Array.isArray(audit.couplingRelationships)
+            && audit.couplingRelationships.length > 0) {
+            this._addCouplingRelationships(audit.couplingRelationships);
+        }
         // Audit layers default hidden; toggled externally via setAuditLayer.
+        // `couplings` auto-displays because it's the v1.2 default-on
+        // feature; the rest stay hidden until the reviewer clicks them.
         Object.keys(this.auditLayers).forEach(k => {
-            this.auditLayers[k].visible = false;
+            this.auditLayers[k].visible = (k === 'couplings');
         });
 
         const bbox = new THREE.Box3();
@@ -474,6 +482,60 @@ export class Viewer3D {
         const g = Math.round(0xff + (0x44 - 0xff) * u);
         const b = Math.round(0x44);
         return (r << 16) | (g << 8) | b;
+    }
+
+    // ---- v1.2 coupling-relationships overlay renderer --------------------
+
+    _couplingKindColor(kind) {
+        switch (kind) {
+            case 'guide_induced':   return 0x007fff;
+            case 'user_specified':  return 0xffaa00;
+            case 'phase_alignment': return 0x00cc66;
+            case 'topology_group':  return 0x9933ff;
+            default:                return 0xffffff;
+        }
+    }
+
+    _addCouplingRelationships(couplings) {
+        const grp = new THREE.Group();
+        grp.name = 'couplings';
+        couplings.forEach(rel => {
+            if (!rel || !Array.isArray(rel.endpoints) || rel.endpoints.length < 2) return;
+            const color = this._couplingKindColor(rel.kind);
+            const mat = new THREE.LineBasicMaterial({
+                color,
+                transparent: true,
+                opacity: 0.9,
+            });
+            const pts = rel.endpoints.slice(0, 2).map(e => new THREE.Vector3(
+                e.position[0], e.position[1], e.position[2]
+            ));
+            // Skip degenerate lines but keep the endpoint marker (user_specified
+            // collapses both endpoints onto the same point).
+            if (pts[0].distanceToSquared(pts[1]) > 1e-12) {
+                const geom = new THREE.BufferGeometry().setFromPoints(pts);
+                const line = new THREE.Line(geom, mat);
+                line.userData.label = rel.id;
+                line.userData.kind = rel.kind;
+                line.userData.metadata = rel.metadata || {};
+                grp.add(line);
+            }
+            const sphereGeom = new THREE.SphereGeometry(0.04, 8, 8);
+            const sphereMat = new THREE.MeshBasicMaterial({
+                color,
+                transparent: true,
+                opacity: 0.9,
+            });
+            pts.forEach((p, idx) => {
+                const sphere = new THREE.Mesh(sphereGeom, sphereMat);
+                sphere.position.copy(p);
+                sphere.userData.label = `${rel.id}#ep${idx}`;
+                sphere.userData.kind = rel.kind;
+                grp.add(sphere);
+            });
+        });
+        this.auditGroup.add(grp);
+        this.auditLayers['couplings'] = grp;
     }
 
     setAuditLayer(layerKey, visible) {

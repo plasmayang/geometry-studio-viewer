@@ -6,6 +6,14 @@ import { Pane } from 'tweakpane';
 // NOT appear here.
 const AUDIT_LAYER_LABELS = {
     heatmaps:  'Profile/Guide Attachment Heatmap',
+    couplings: 'Coupling Relationships (guides + user + phase alignment + topology)',
+};
+
+// Per-layer default visibility. Couplings auto-display by default
+// (the new v1.2 feature; the heatmaps stay hidden to avoid clutter).
+const AUDIT_LAYER_DEFAULT_VISIBLE = {
+    heatmaps:  false,
+    couplings: true,
 };
 
 const PSI_SERIES_COLORS = [
@@ -75,10 +83,27 @@ export class AuditPanel {
             expanded: true,
         });
         Object.keys(AUDIT_LAYER_LABELS).forEach(layerKey => {
-            this.layerParams[layerKey] = { visible: false };
-            layersFolder.addBinding(this.layerParams[layerKey], 'visible', {
+            const defaultVisible = AUDIT_LAYER_DEFAULT_VISIBLE[layerKey] === true;
+            this.layerParams[layerKey] = { visible: defaultVisible };
+            const binding = layersFolder.addBinding(
+                this.layerParams[layerKey], 'visible', {
                 label: AUDIT_LAYER_LABELS[layerKey],
-            }).on('change', (ev) => this.onToggleLayer(layerKey, ev.value));
+            });
+            // Tweakpane's `change` event AND the native input
+            // `change` event: the dual listener covers both click
+            // paths (label wrapper vs checkbox skin).
+            binding.on('change', (ev) => this.onToggleLayer(layerKey, ev.value));
+            const inputEl = binding.element.querySelector('input[type=checkbox]');
+            if (inputEl) {
+                inputEl.addEventListener('change', () => {
+                    this.onToggleLayer(layerKey, !!inputEl.checked);
+                });
+            }
+            // Sync the default-visible state down to the viewer; without
+            // this the checkbox shows ✓ but the overlay is hidden.
+            if (defaultVisible && typeof this.onToggleLayer === 'function') {
+                this.onToggleLayer(layerKey, true);
+            }
         });
 
         const intermediate = this.audit && this.audit.intermediate;
@@ -93,6 +118,19 @@ export class AuditPanel {
             if (stats.length > 0) {
                 const txt = stats.join(' | ');
                 layersFolder.addBinding({ val: txt }, 'val', { readonly: true, label: 'topology' });
+            }
+
+            // v1.2 coupling relationships: count by kind so the reviewer
+            // can see which categories are present before toggling on.
+            const couplings = Array.isArray(this.audit?.couplingRelationships)
+                ? this.audit.couplingRelationships : [];
+            if (couplings.length > 0) {
+                const counts = { guide_induced: 0, user_specified: 0, phase_alignment: 0, topology_group: 0 };
+                couplings.forEach(rel => {
+                    if (counts[rel.kind] !== undefined) counts[rel.kind] += 1;
+                });
+                const summary = `guide: ${counts.guide_induced}, user: ${counts.user_specified}, phase: ${counts.phase_alignment}, topo: ${counts.topology_group}`;
+                layersFolder.addBinding({ val: summary }, 'val', { readonly: true, label: 'couplings' });
             }
 
             if (intermediate.psi_basis && intermediate.psi_basis.samples) {
