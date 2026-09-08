@@ -106,11 +106,13 @@ export class GeometryParser {
     static parseAudit(jsonData) {
         const hasProcess = jsonData.process_audit && typeof jsonData.process_audit === 'object';
         const hasIntermediate = jsonData.intermediate_products && typeof jsonData.intermediate_products === 'object';
-        if (!hasProcess && !hasIntermediate) return null;
+        const hasDebugMarkers = Array.isArray(jsonData.debug_markers) && jsonData.debug_markers.length > 0;
+        if (!hasProcess && !hasIntermediate && !hasDebugMarkers) return null;
         return {
             process: hasProcess ? jsonData.process_audit : null,
             intermediate: hasIntermediate ? jsonData.intermediate_products : null,
             couplingRelationships: this.parseCouplingRelationships(jsonData),
+            debugMarkers: hasDebugMarkers ? jsonData.debug_markers : [],
             schemaVersion: jsonData.schema_version || '1.0',
         };
     }

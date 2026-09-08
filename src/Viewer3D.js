@@ -127,11 +127,16 @@ export class Viewer3D {
             && audit.couplingRelationships.length > 0) {
             this._addCouplingRelationships(audit.couplingRelationships);
         }
+        // VxLoft14 visualization debug products overlay (scenarios 2..9 markers)
+        if (audit && Array.isArray(audit.debugMarkers)
+            && audit.debugMarkers.length > 0) {
+            this._addDebugMarkers(audit.debugMarkers);
+        }
         // Audit layers default hidden; toggled externally via setAuditLayer.
-        // `couplings` auto-displays because it's the v1.2 default-on
-        // feature; the rest stay hidden until the reviewer clicks them.
+        // `couplings` and `debug_markers` auto-display by default;
+        // the rest stay hidden until the reviewer clicks them.
         Object.keys(this.auditLayers).forEach(k => {
-            this.auditLayers[k].visible = (k === 'couplings');
+            this.auditLayers[k].visible = (k === 'couplings' || k === 'debug_markers');
         });
 
         const bbox = new THREE.Box3();
@@ -536,6 +541,143 @@ export class Viewer3D {
         });
         this.auditGroup.add(grp);
         this.auditLayers['couplings'] = grp;
+    }
+
+    // ---- VxLoft14 visualization debug overlay renderer ------------------
+
+    _debugMarkerColor(colorCode, defaultColor = 0xff0055) {
+        switch (colorCode) {
+            case 1: return 0xff2222; // red (Guide attach fail)
+            case 2: return 0x22cc22; // green
+            case 3: return 0xffaa00; // yellow / orange (Profile attach/adhesion fail)
+            case 4: return 0x2288ff; // blue
+            case 5: return 0xee00ee; // magenta (Surface bounds fail)
+            case 6: return 0x00eeee; // cyan (Continuity fail)
+            default: return defaultColor;
+        }
+    }
+
+    _addDebugMarkers(markers) {
+        const grp = new THREE.Group();
+        grp.name = 'debug_markers';
+
+        markers.forEach(m => {
+            if (!m) return;
+            if (m.kind === 'point') {
+                const pts = m.data || [];
+                if (pts.length >= 3) {
+                    const sphereGeom = new THREE.SphereGeometry(0.06, 12, 12);
+                    const sphereMat = new THREE.MeshBasicMaterial({
+                        color: 0xff0044,
+                        transparent: true,
+                        opacity: 0.95
+                    });
+                    const sphere = new THREE.Mesh(sphereGeom, sphereMat);
+                    sphere.position.set(pts[0], pts[1], pts[2]);
+                    sphere.userData.label = m.label || 'Debug Point';
+                    grp.add(sphere);
+                }
+            } else if (m.kind === 'curve') {
+                const raw = m.data || [];
+                if (raw.length >= 6) {
+                    const pts = [];
+                    const stride = (raw.length % 3 === 0) ? 3 : 4;
+                    for (let i = 0; i < raw.length; i += stride) {
+                        pts.push(new THREE.Vector3(raw[i], raw[i+1], raw[i+2]));
+                    }
+                    const geom = new THREE.BufferGeometry().setFromPoints(pts);
+                    const lineMat = new THREE.LineBasicMaterial({
+                        color: 0xff00aa,
+                        linewidth: 2,
+                        transparent: true,
+                        opacity: 0.9
+                    });
+                    const line = new THREE.Line(geom, lineMat);
+                    line.userData.label = m.label || 'Debug Curve';
+                    grp.add(line);
+                }
+            } else if (m.kind === 'surface' || m.kind === 'surface_color') {
+                try {
+                    const meta = (m.failure_kind || '').split(',');
+                    if (meta.length >= 7) {
+                        const degU = parseInt(meta[0], 10);
+                        const degV = parseInt(meta[1], 10);
+                        const nRows = parseInt(meta[2], 10);
+                        const nCols = parseInt(meta[3], 10);
+                        const nKnotsU = parseInt(meta[4], 10);
+                        const nKnotsV = parseInt(meta[5], 10);
+                        const dim = parseInt(meta[6], 10);
+
+                        const totalCpCoords = nRows * nCols * dim;
+                        const raw = m.data || [];
+                        if (raw.length >= totalCpCoords + nKnotsU + nKnotsV) {
+                            const knotsU = raw.slice(totalCpCoords, totalCpCoords + nKnotsU);
+                            const knotsV = raw.slice(totalCpCoords + nKnotsU, totalCpCoords + nKnotsU + nKnotsV);
+
+                            const controlPoints = [];
+                            for (let i = 0; i < nCols; i++) {
+                                controlPoints[i] = [];
+                                for (let j = 0; j < nRows; j++) {
+                                    const idx = (j * nCols + i) * dim;
+                                    controlPoints[i][j] = new THREE.Vector4(
+                                        raw[idx], raw[idx+1], raw[idx+2],
+                                        dim >= 4 ? raw[idx+3] : 1.0
+                                    );
+                                }
+                            }
+                            const ns = new NURBSSurface(degU, degV, knotsU, knotsV, controlPoints);
+                            const getSamples = (knots, p, steps) => {
+                                const min = knots[p], max = knots[knots.length - p - 1], range = max - min;
+                                let s = []; for (let step = 0; step <= steps; step++) s.push(step / steps);
+                                for (let step = p; step < knots.length - p; step++) if (range > 0) s.push((knots[step] - min) / range);
+                                s.sort((a, b) => a - b);
+                                let u = [s[0]]; for (let step = 1; step < s.length; step++) if (s[step] - u[u.length-1] > 1e-6) u.push(s[step]);
+                                return u;
+                            };
+                            const uS = getSamples(knotsU, degU, 25), vS = getSamples(knotsV, degV, 25);
+                            const geom = new THREE.BufferGeometry();
+                            const verts = [], uvs = [], idxs = [];
+                            const target = new THREE.Vector3();
+                            for (let j = 0; j < vS.length; j++) {
+                                for (let i = 0; i < uS.length; i++) {
+                                    ns.getPoint(uS[i], vS[j], target);
+                                    verts.push(target.x, target.y, target.z);
+                                    uvs.push(uS[i], vS[j]);
+                                }
+                            }
+                            for (let j = 0; j < vS.length - 1; j++) {
+                                for (let i = 0; i < uS.length - 1; i++) {
+                                    const a = i + j * uS.length, b = i + 1 + j * uS.length,
+                                          c = i + (j + 1) * uS.length, d = i + 1 + (j + 1) * uS.length;
+                                    idxs.push(a, b, d, a, d, c);
+                                }
+                            }
+                            geom.setIndex(idxs);
+                            geom.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+                            geom.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+                            geom.computeVertexNormals();
+
+                            const srfColor = this._debugMarkerColor(m.color, 0xff0044);
+                            const mat = new THREE.MeshPhongMaterial({
+                                color: srfColor,
+                                wireframe: false,
+                                transparent: true,
+                                opacity: 0.45,
+                                side: THREE.DoubleSide
+                            });
+                            const mesh = new THREE.Mesh(geom, mat);
+                            mesh.userData.label = m.label || 'Debug Surface';
+                            grp.add(mesh);
+                        }
+                    }
+                } catch (e) {
+                    console.warn('Viewer3D: failed to parse debug NURBS surface', e);
+                }
+            }
+        });
+
+        this.auditGroup.add(grp);
+        this.auditLayers['debug_markers'] = grp;
     }
 
     setAuditLayer(layerKey, visible) {

@@ -5,15 +5,17 @@ import { Pane } from 'tweakpane';
 // surface-toggle rail with FreeBlend3D / AffineTransport, so it does
 // NOT appear here.
 const AUDIT_LAYER_LABELS = {
-    heatmaps:  'Profile/Guide Attachment Heatmap',
-    couplings: 'Coupling Relationships (guides + user + phase alignment + topology)',
+    heatmaps:      'Profile/Guide Attachment Heatmap',
+    couplings:     'Coupling Relationships (guides + user + phase alignment + topology)',
+    debug_markers: 'Debug Viz Products (VxDb Markers & Failure Overlays)',
 };
 
-// Per-layer default visibility. Couplings auto-display by default
-// (the new v1.2 feature; the heatmaps stay hidden to avoid clutter).
+// Per-layer default visibility. Couplings and debug_markers auto-display by default
+// (the heatmaps stay hidden to avoid clutter).
 const AUDIT_LAYER_DEFAULT_VISIBLE = {
-    heatmaps:  false,
-    couplings: true,
+    heatmaps:      false,
+    couplings:     true,
+    debug_markers: true,
 };
 
 const PSI_SERIES_COLORS = [
@@ -140,6 +142,20 @@ export class AuditPanel {
                 });
                 this._buildPsiMicroCanvas(psiFolder, intermediate.psi_basis);
             }
+        }
+
+        const debugMarkers = Array.isArray(this.audit?.debugMarkers)
+            ? this.audit.debugMarkers : [];
+        if (debugMarkers.length > 0) {
+            let failures = 0, curves = 0, surfaces = 0, points = 0;
+            debugMarkers.forEach(m => {
+                if (m.kind === 'failure') failures++;
+                else if (m.kind === 'curve') curves++;
+                else if (m.kind === 'surface' || m.kind === 'surface_color') surfaces++;
+                else if (m.kind === 'point') points++;
+            });
+            const dbgSummary = `failures: ${failures}, srfs: ${surfaces}, crvs: ${curves}, pts: ${points}`;
+            layersFolder.addBinding({ val: dbgSummary }, 'val', { readonly: true, label: 'debug info' });
         }
     }
 
