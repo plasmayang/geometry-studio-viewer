@@ -557,6 +557,44 @@ export class Viewer3D {
         }
     }
 
+    // Render a short text label as a THREE.Sprite using a CanvasTexture.
+    // size is the OD_real VxDbAnnoDisp font-size hint (typically 1.0);
+    // we scale the sprite by it so multi-line annotations are visually
+    // proportional across the gallery.
+    _makeAnnoSprite(text, color, size = 1.0) {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const basePx = 36;  // ~0.5 world-unit at scale=1; we scale by size
+        const fontPx = Math.max(10, Math.round(basePx * Math.max(0.25, size) * dpr));
+        const padding = 4 * dpr;
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        ctx.font = `${fontPx}px sans-serif`;
+        const metrics = ctx.measureText(text);
+        const w = Math.ceil(metrics.width) + 2 * padding;
+        const h = fontPx + 2 * padding;
+        canvas.width = w;
+        canvas.height = h;
+        // Re-apply font after canvas resize (browser resets the context).
+        ctx.font = `${fontPx}px sans-serif`;
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#000000cc';   // dark backing for legibility
+        ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = '#' + color.toString(16).padStart(6, '0');
+        ctx.fillText(text, w / 2, h / 2);
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.needsUpdate = true;
+        const mat = new THREE.SpriteMaterial({
+            map: tex,
+            transparent: true,
+            depthTest: false
+        });
+        const sprite = new THREE.Sprite(mat);
+        // Match canvas aspect; scale by the requested size.
+        sprite.scale.set(w / h * 0.2 * size, 0.2 * size, 1);
+        return sprite;
+    }
+
     _addDebugMarkers(markers) {
         const grp = new THREE.Group();
         grp.name = 'debug_markers';
@@ -566,9 +604,14 @@ export class Viewer3D {
             if (m.kind === 'point') {
                 const pts = m.data || [];
                 if (pts.length >= 3) {
+                    // Sphere radius scales with m.data[3] when present (anno
+                    // marker reuses this path for text-annotation points via
+                    // the "point" kind; we leave the data[3] interpretation
+                    // to the anno branch below). For plain point markers
+                    // data[3] is undefined and we use the default size.
                     const sphereGeom = new THREE.SphereGeometry(0.06, 12, 12);
                     const sphereMat = new THREE.MeshBasicMaterial({
-                        color: 0xff0044,
+                        color: this._debugMarkerColor(m.color, 0xff0044),
                         transparent: true,
                         opacity: 0.95
                     });
@@ -576,6 +619,22 @@ export class Viewer3D {
                     sphere.position.set(pts[0], pts[1], pts[2]);
                     sphere.userData.label = m.label || 'Debug Point';
                     grp.add(sphere);
+                }
+            } else if (m.kind === 'anno') {
+                // Text annotation: m.data is [x, y, z, size]; m.label is the
+                // text content. Render with THREE.Sprite + canvas texture so
+                // the label stays readable regardless of camera distance.
+                const pts = m.data || [];
+                if (pts.length >= 4) {
+                    const [x, y, z, size] = pts;
+                    const text = m.label || '';
+                    if (text.length === 0) return;
+                    const sprite = this._makeAnnoSprite(text,
+                        this._debugMarkerColor(m.color, 0xffffff),
+                        size);
+                    sprite.position.set(x, y, z);
+                    sprite.userData.label = text;
+                    grp.add(sprite);
                 }
             } else if (m.kind === 'curve') {
                 const raw = m.data || [];
@@ -587,7 +646,7 @@ export class Viewer3D {
                     }
                     const geom = new THREE.BufferGeometry().setFromPoints(pts);
                     const lineMat = new THREE.LineBasicMaterial({
-                        color: 0xff00aa,
+                        color: this._debugMarkerColor(m.color, 0xff00aa),
                         linewidth: 2,
                         transparent: true,
                         opacity: 0.9
