@@ -19,6 +19,19 @@ const VIEWER_CONFIG = typeof __VIEWER_CONFIG__ !== 'undefined' ? __VIEWER_CONFIG
     }
 };
 
+function _resolveActiveProfileName() {
+    if (typeof window === 'undefined') return VIEWER_CONFIG.profile;
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl = params.get('profile');
+    if (fromUrl && VIEWER_CONFIG.profiles && VIEWER_CONFIG.profiles[fromUrl]) {
+        return fromUrl;
+    }
+    const path = (window.location.pathname || '').toLowerCase();
+    if (path.includes('guide-binding')) return 'gluing-guide-to-profile';
+    return VIEWER_CONFIG.profile;
+}
+const ACTIVE_PROFILE_NAME = _resolveActiveProfileName();
+
 class App {
     constructor() {
         this.viewer = new Viewer3D();
@@ -66,7 +79,7 @@ class App {
             if (urlParams.has('data')) {
                 this.dataSourceBase = urlParams.get('data');
             } else {
-                const activeProfile = VIEWER_CONFIG.profile
+                const activeProfile = ACTIVE_PROFILE_NAME
                     || Object.keys(VIEWER_CONFIG.profiles || {})[0]
                     || null;
                 const p = activeProfile ? VIEWER_CONFIG.profiles[activeProfile] : null;
@@ -78,7 +91,7 @@ class App {
                 manifest: this.manifest,
                 dataSource: this.dataSourceBase,
                 profiles: VIEWER_CONFIG.profiles,
-                activeProfileName: VIEWER_CONFIG.profile,
+                activeProfileName: ACTIVE_PROFILE_NAME,
                 onCaseChange: (caseFile) => {
                     this.currentCase = { source: 'directory', file: caseFile };
                     this.loadData();
@@ -207,14 +220,127 @@ class App {
 
         document.getElementById('case-title').innerText = jsonData.caseName || jsonData.name || 'Untitled Case';
 
+        const banner = document.getElementById('known-limitation-banner');
+        if (banner) {
+            const caseId = (jsonData.caseId || jsonData.id || sourceLabel || '');
+            const tags = Array.isArray(jsonData.tags) ? jsonData.tags : [];
+            const isGG012 = (caseId === 'TC_LOFT_GGTP_012') || tags.includes('scenario:gg-012');
+            banner.classList.toggle('visible', isGG012);
+        }
+
         let infoHtml = `<div style="margin-bottom: 10px; border-bottom: 1px solid #eee; padding-bottom: 5px;"><strong>Summary:</strong><br/>${jsonData.description || 'N/A'}</div>`;
         if (jsonData.tags) {
             infoHtml += `<div style="margin-bottom: 10px;"><strong>Tags:</strong><br/><span style="font-size: 11px;">${jsonData.tags.join(', ')}</span></div>`;
+        }
+
+        // INPUT echo — rendered side-by-side with the output report so the
+        // reviewer can judge whether the spec-0004 binding is correct.
+        if (jsonData.input && ACTIVE_PROFILE_NAME === 'gluing-guide-to-profile') {
+            const inp = jsonData.input;
+            infoHtml += `<details open style="margin-bottom: 10px;"><summary style="font-weight: 600; cursor: pointer; user-select: none;">Input (full)</summary><div style="margin-top: 4px; font-size: 11px;">`;
+            if (inp.expected_metrics) {
+                const em = inp.expected_metrics;
+                infoHtml += `<div style="margin-bottom: 6px;"><strong>expected_metrics:</strong> `
+                    + `<span style="font-family: monospace;">tolerance=${em.tolerance ?? '?'}`
+                    + ` | guide_count=${em.guide_count ?? '?'}`
+                    + ` | profile_zero_error_rows=[${(em.profile_zero_error_rows || []).join(', ')}]</span></div>`;
+            }
+            const profs = Array.isArray(inp.profiles) ? inp.profiles : [];
+            if (profs.length > 0) {
+                infoHtml += `<div style="margin-bottom: 4px;"><strong>Profiles (${profs.length}):</strong></div>`;
+                profs.forEach(p => {
+                    const cps = Array.isArray(p.control_points) ? p.control_points : [];
+                    const cpStr = cps.map(cp => {
+                        const arr = Array.isArray(cp) ? cp : [];
+                        const w = arr.length >= 4 ? arr[3] : 1;
+                        return `(${arr.slice(0, 3).map(v => +v.toFixed(3)).join(', ')}, w=${w})`;
+                    }).join(' ');
+                    const knots = Array.isArray(p.knots) ? p.knots : [];
+                    infoHtml += `<div style="margin: 2px 0 6px 8px; font-family: monospace; font-size: 10px; color: #333;">`
+                        + `<strong>${p.label || ('profile_' + p.index)}</strong> &nbsp; p=${p.p} &nbsp; knots=[${knots.map(k => +k.toFixed(2)).join(',')}] &nbsp; n_cp=${cps.length}`
+                        + (p.is_periodic ? ' &nbsp; <em>periodic</em>' : '')
+                        + `<br/>&nbsp;&nbsp;CPs: ${cpStr}</div>`;
+                });
+            }
+            const gds = Array.isArray(inp.guides) ? inp.guides : [];
+            if (gds.length > 0) {
+                infoHtml += `<div style="margin-bottom: 4px;"><strong>Guides (${gds.length}):</strong></div>`;
+                gds.forEach(g => {
+                    const cps = Array.isArray(g.control_points) ? g.control_points : [];
+                    const cpStr = cps.map(cp => {
+                        const arr = Array.isArray(cp) ? cp : [];
+                        return `(${arr.slice(0, 3).map(v => +v.toFixed(3)).join(', ')})`;
+                    }).join(' → ');
+                    infoHtml += `<div style="margin: 2px 0 6px 8px; font-family: monospace; font-size: 10px; color: #333;">`
+                        + `<strong>${g.label || ('guide_' + g.index)}</strong> &nbsp; p=${g.p} &nbsp; n_cp=${cps.length}`
+                        + `<br/>&nbsp;&nbsp;CPs: ${cpStr}</div>`;
+                });
+            }
+            if (inp.spine) {
+                const sp = inp.spine;
+                const spcps = Array.isArray(sp.control_points) ? sp.control_points : [];
+                const spcpStr = spcps.map(cp => {
+                    const arr = Array.isArray(cp) ? cp : [];
+                    return `(${arr.slice(0, 3).map(v => +v.toFixed(3)).join(', ')})`;
+                }).join(' → ');
+                infoHtml += `<div style="margin: 4px 0 6px 8px;"><strong>Spine (deg=${sp.p}, n_cp=${spcps.length}):</strong> ${spcpStr}</div>`;
+            }
+            infoHtml += `</div></details>`;
+        }
+
+        if (jsonData.guide_binding_report) {
+            const r = jsonData.guide_binding_report;
+            const mono = r.monotone_check || 'n/a';
+            const monoColor = (mono === 'pass') ? '#2e7d32' : '#d32f2f';
+            const segs = Array.isArray(r.degenerate_segments) ? r.degenerate_segments : [];
+            const segRows = segs.map(s => {
+                const uLo = (typeof s.u_lo === 'number') ? s.u_lo.toFixed(2) : '?';
+                const uHi = (typeof s.u_hi === 'number') ? s.u_hi.toFixed(2) : '?';
+                const touches = `${s.touches_u_min ? '↓' : ' '}${s.touches_u_max ? '↑' : ' '}`;
+                return `<div style="font-family: monospace; font-size: 11px;">[${uLo}, ${uHi}] ${touches}</div>`;
+            }).join('');
+            const res = Array.isArray(r.guide_resolutions) ? r.guide_resolutions : [];
+            const resRows = res.map(g => {
+                const u = (typeof g.u_param === 'number') ? g.u_param.toFixed(3) : '?';
+                const fixed = g.fixed ? 'fixed' : 'free';
+                const seg = (g.segment_index !== undefined) ? `seg=${g.segment_index}` : '';
+                const tag = (g.guide_id !== undefined) ? g.guide_id : `#${g.guide_index ?? '?'}`;
+                const color = g.fixed ? '#d32f2f' : '#1976d2';
+                return `<div style="font-family: monospace; font-size: 11px; color: ${color};">${tag}  u=${u}  ${fixed}  ${seg}</div>`;
+            }).join('');
+            infoHtml += `<div style="margin-bottom: 10px;"><strong>Guide Binding Report:</strong>`
+                + `<div style="font-size: 11px;">monotone: <span style="color: ${monoColor};">${mono}</span>`
+                + ` | guides: ${r.guide_count ?? res.length}</div>`
+                + (segRows ? `<div style="margin-top: 4px;"><strong>Degenerate segments:</strong>${segRows}</div>` : '')
+                + (resRows ? `<div style="margin-top: 4px;"><strong>Resolutions:</strong>${resRows}</div>` : '')
+                + `</div>`;
         }
         infoHtml += `<div style="margin-bottom: 10px;"><strong>Intent Space:</strong><br/><span style="font-family: monospace; font-size: 11px; white-space: pre-wrap;">${jsonData.intent_space || 'N/A'}</span></div>`;
         infoHtml += `<div><strong>Success Criteria:</strong><br/><span style="color: #2e7d32;">${jsonData.success_criteria || 'N/A'}</span></div>`;
 
         document.getElementById('case-description').innerHTML = infoHtml;
+
+        // Spec 0004 envelopes (e2e-gluing-guide-to-profile) carry a
+        // `guide_binding_report` field. Route those through the
+        // dedicated renderer; everything else goes through the
+        // generic v1.0 path.
+        if (jsonData.guide_binding_report && ACTIVE_PROFILE_NAME === 'gluing-guide-to-profile') {
+            const parsed = GeometryParser.parseGuideBinding(jsonData);
+            const { surfaceLabels, curveLabels, auditLayers, guideBindingLayers } =
+                this.viewer.loadGuideBinding(parsed);
+            if (this.ui) {
+                this.ui.updateGuideBindingPanel(
+                    { surfaceLabels, curveLabels, guideBindingLayers, audit: parsed.audit },
+                    {
+                        onSurfaceToggle: (label, visible) => this.viewer.setSurfaceVisibility(label, visible),
+                        onCurveToggle: (label, visible) => this.viewer.setCurveVisibility(label, visible),
+                        onGuideBindingToggle: (layerKey, visible) => this.viewer.setGuideBindingLayer(layerKey, visible),
+                        onAuditToggle: (layerKey, visible) => this.viewer.setAuditLayer(layerKey, visible),
+                    }
+                );
+            }
+            return;
+        }
 
         const { geometry, markers, nurbs, audit } = GeometryParser.parseMesh(jsonData);
         const { surfaceLabels, curveLabels, auditLayers } =

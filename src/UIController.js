@@ -211,4 +211,59 @@ export class UIController {
             onToggleLayer: (layerKey, visible) => onToggleLayer(layerKey, visible),
         });
     }
+
+    /**
+     * Guide-binding (spec 0004) panel: surfaces, curves, and the
+     * three guide-binding layers (degenerate_segments,
+     * attachment_spheres, attachment_labels) as independent toggles.
+     * Audit layers (heatmaps / couplings / debug_markers) are wired
+     * through the existing AuditPanel so the reviewer has a single
+     * place to control them.
+     */
+    updateGuideBindingPanel(payload, callbacks) {
+        const { surfaceLabels, curveLabels, guideBindingLayers, audit } = payload;
+        const { onSurfaceToggle, onCurveToggle, onGuideBindingToggle, onAuditToggle } = callbacks;
+
+        this.surfaceFolder.children.forEach(c => c.dispose());
+        surfaceLabels.forEach(label => {
+            const key = label.replace(/[^A-Za-z0-9_]/g, '_');
+            const params = { [key]: true };
+            this.surfaceFolder.addBinding(params, key, { label })
+                .on('change', (ev) => onSurfaceToggle(label, ev.value));
+        });
+
+        this.curveFolder.children.forEach(c => c.dispose());
+        curveLabels.forEach(label => {
+            const key = label.replace(/[^A-Za-z0-9_]/g, '_');
+            const params = { [key]: true };
+            this.curveFolder.addBinding(params, key, { label })
+                .on('change', (ev) => onCurveToggle(label, ev.value));
+        });
+
+        if (this.guideBindingFolder) {
+            this.guideBindingFolder.dispose();
+        }
+        this.guideBindingFolder = this.pane.addFolder({
+            title: 'Guide Binding (spec 0004)',
+            expanded: true,
+        });
+        const layerState = {};
+        guideBindingLayers.forEach(layerKey => {
+            layerState[layerKey] = true;
+            this.guideBindingFolder.addBinding(layerState, layerKey, {
+                label: layerKey.replace(/_/g, ' ')
+            }).on('change', (ev) => onGuideBindingToggle(layerKey, ev.value));
+        });
+
+        if (audit) {
+            if (this.auditPanel) this.auditPanel.dispose();
+            this.auditPanel = new AuditPanel({
+                audit,
+                onToggleLayer: (layerKey, visible) => onAuditToggle(layerKey, visible),
+            });
+        } else if (this.auditPanel) {
+            this.auditPanel.dispose();
+            this.auditPanel = null;
+        }
+    }
 }

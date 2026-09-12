@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guide → Profile Binding (Spec 0004)</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #f5f7fa;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        #app { width: 100vw; height: 100vh; }
+
+        /* Tweakpane Light Theme Overrides */
+        :root {
+            --tp-base-background-color: rgba(255, 255, 255, 0.8);
+            --tp-base-shadow-color: rgba(0, 0, 0, 0.05);
+            --tp-button-background-color: rgba(0, 0, 0, 0.05);
+            --tp-button-background-color-active: rgba(0, 0, 0, 0.15);
+            --tp-button-background-color-focus: rgba(0, 0, 0, 0.1);
+            --tp-button-background-color-hover: rgba(0, 0, 0, 0.08);
+            --tp-button-foreground-color: #111;
+            --tp-container-background-color: rgba(255, 255, 255, 0.5);
+            --tp-container-background-color-active: rgba(255, 255, 255, 0.7);
+            --tp-container-background-color-focus: rgba(255, 255, 255, 0.6);
+            --tp-container-background-color-hover: rgba(255, 255, 255, 0.55);
+            --tp-container-foreground-color: #333;
+            --tp-input-background-color: rgba(0, 0, 0, 0.03);
+            --tp-input-background-color-active: rgba(0, 0, 0, 0.08);
+            --tp-input-background-color-focus: rgba(0, 0, 0, 0.05);
+            --tp-input-background-color-hover: rgba(0, 0, 0, 0.04);
+            --tp-input-foreground-color: #111;
+            --tp-label-foreground-color: #555;
+            --tp-monitor-background-color: rgba(0, 0, 0, 0.03);
+            --tp-monitor-foreground-color: #777;
+        }
+
+        .tp-dfwv {
+            backdrop-filter: blur(10px);
+            border-radius: 8px;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+            margin: 10px;
+        }
+
+        .header-bar {
+            position: absolute;
+            top: 0;
+            right: 0;
+            padding: 12px 22px;
+            background: linear-gradient(135deg, rgba(255, 23, 68, 0.08), rgba(0, 170, 255, 0.04));
+            border-left: 1px solid #ddd;
+            border-bottom: 1px solid #ddd;
+            border-bottom-left-radius: 8px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+            z-index: 99;
+            max-width: 560px;
+            font-size: 13px;
+            color: #1a1a1a;
+            line-height: 1.45;
+        }
+        .header-bar h1 {
+            margin: 0 0 4px 0;
+            font-size: 17px;
+            color: #1a1a1a;
+        }
+        .header-bar .spec-tag {
+            display: inline-block;
+            padding: 2px 8px;
+            margin-bottom: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.4px;
+            color: #b71c1c;
+            background: #ffebee;
+            border: 1px solid #ffcdd2;
+            border-radius: 12px;
+        }
+        .header-bar .subtitle {
+            margin: 0;
+            font-size: 12px;
+            color: #4a4a4a;
+            line-height: 1.5;
+        }
+        .legend-swatch {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 2px;
+            margin-right: 4px;
+            vertical-align: middle;
+        }
+        .legend-fixed  { background: #ff1744; }
+        .legend-free   { background: #00aaff; }
+        .legend-seg0   { background: #ff1744; }
+        .legend-seg1   { background: #6b6b6b; opacity: 0.6; }
+        .legend-guide  { background: #ff00ff; }
+        .known-limitation-banner {
+            display: none;
+            margin-top: 8px;
+            padding: 8px 12px;
+            font-size: 12px;
+            line-height: 1.5;
+            color: #5d4037;
+            background: #fff8e1;
+            border: 1px solid #ffe082;
+            border-left: 3px solid #ffa000;
+            border-radius: 4px;
+        }
+        .known-limitation-banner.visible {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div id="app"></div>
+
+    <div class="header-bar">
+        <span class="spec-tag">SPEC 0004</span>
+        <h1>Guide → Profile Binding</h1>
+        <p class="subtitle">
+            Visualizes how guide curves bind to degenerate profile curves under the
+            spec&nbsp;0004 algorithm. Each case shows
+            <span class="legend-swatch legend-seg0"></span><strong>sec[0]</strong> (degenerate profile, highlighted) and
+            <span class="legend-swatch legend-seg1"></span><strong>sec[1]</strong> (regular profile, dimmed) with
+            <span class="legend-swatch legend-guide"></span><strong>guide</strong> curves.
+            Attachment spheres mark each resolved u_param:
+            <span class="legend-swatch legend-fixed"></span><strong>red&nbsp;=&nbsp;fixed</strong> (boundary-pinned or anchor),
+            <span class="legend-swatch legend-free"></span><strong>cyan&nbsp;=&nbsp;free</strong> (algorithm-assigned).
+        </p>
+    </div>
+
+    <div id="info-panel" style="position: absolute; top: 20px; left: 20px; width: 340px; max-height: 85vh; display: flex; flex-direction: column; padding: 15px; background: rgba(255,255,255,0.85); backdrop-filter: blur(10px); border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,0.1); z-index: 100;">
+        <h2 id="case-title" style="margin: 0 0 10px 0; font-size: 18px; color: #1a1a1a; border-bottom: 2px solid #ff1744; padding-bottom: 5px;">Select a Case</h2>
+        <input type="text" id="tag-filter" placeholder="Filter by tag (e.g. glue-guide-to-profile:yes -archive)" style="width: 100%; padding: 8px; margin-bottom: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 13px;" />
+        <div id="tag-cloud-header" style="display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; margin-bottom: 6px; cursor: pointer; user-select: none; background: #f5f5f5; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; color: #555;">
+            <span><strong>Tags</strong> (<span id="tag-cloud-count">0</span>)</span>
+            <span id="tag-cloud-chevron" style="transition: transform 0.2s;">▶</span>
+        </div>
+        <div id="tag-cloud" style="margin-bottom: 10px; display: none; flex-wrap: wrap; gap: 5px;"></div>
+        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+            <input
+                type="search"
+                id="case-name-filter"
+                placeholder="🔍 Search case name (e.g. TC_LOFT_GGTP_001)"
+                aria-label="Search by case name"
+                style="flex: 1; padding: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 13px;"
+            />
+            <button
+                type="button"
+                id="case-name-filter-clear"
+                title="Clear search"
+                aria-label="Clear case name search"
+                style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; background: #f5f5f5; cursor: pointer; font-size: 12px; color: #555;"
+            >×</button>
+        </div>
+        <div id="case-list-header" style="display: flex; align-items: center; justify-content: space-between; padding: 4px 6px; margin-bottom: 4px; font-size: 12px; color: #555;">
+            <span><strong>Cases</strong> (<span id="case-list-count">0</span> / <span id="case-list-total">0</span>)</span>
+            <span id="case-name-filter-empty" style="display: none; font-size: 10px; color: #d32f2f;">no matches</span>
+        </div>
+        <div id="case-list" style="margin-bottom: 15px; min-height: 100px; flex: 1; max-height: 50vh; overflow-y: auto; border: 1px solid #eee; padding: 5px; border-radius: 4px; background: #fff;">
+            <!-- list of cases will go here -->
+        </div>
+        <div id="case-description" style="margin: 0; font-size: 13px; line-height: 1.4; color: #4a4a4a; overflow-y: auto;">Loading binding data...</div>
+        <div id="known-limitation-banner" class="known-limitation-banner">
+            <strong>Known algorithm limitation:</strong>
+            The current case has two degenerate segments sharing a control point at a span boundary. The spec 0004 batch algorithm's segment-detection heuristic only finds the second segment, so the first guide reports its closest-point fallback (<code>u = initial_u</code>) instead of the spec-mandated midpoint of the first degenerate span. The expected u_params per the spec are documented in the case description.
+        </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+</body>
+</html>

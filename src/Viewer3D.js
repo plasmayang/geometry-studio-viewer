@@ -759,5 +759,317 @@ export class Viewer3D {
     setControlPolygon(enabled) { this.nurbsGroup.traverse(c => { if (c.type === 'Line' && c.material && c.material.opacity < 0.5) c.visible = enabled; }); }
     setGrid(enabled) { if (this.grid) this.grid.visible = enabled; if (this.gridXZ) this.gridXZ.visible = enabled; }
     setMeshColor(color) { this.material.color.set(color); }
+
+    _makeNurbsCurveFromDescriptor(data) {
+        if (!data) return null;
+        try {
+            const p = (data.degree !== undefined) ? data.degree : data.p;
+            let rawCPs = data.controlPoints || data.control_points;
+            let isFlatObj = false;
+            if (rawCPs && rawCPs.length > 0 && typeof rawCPs[0] === 'object') {
+                const flat = [];
+                rawCPs.forEach(pt => flat.push(pt.x, pt.y, pt.z));
+                rawCPs = flat;
+                isFlatObj = true;
+            }
+            if (!rawCPs || rawCPs.length === 0) return null;
+
+            let curveKnots;
+            let numPts;
+            if (data.knots && data.knots.length > 0) {
+                curveKnots = Array.from(data.knots);
+                numPts = curveKnots.length - p - 1;
+            } else {
+                numPts = isFlatObj ? (rawCPs.length / 3) : Math.floor(rawCPs.length / 3);
+                curveKnots = [];
+                for (let k = 0; k <= p; k++) curveKnots.push(0);
+                for (let k = 1; k < numPts - p; k++) curveKnots.push(k);
+                for (let k = 0; k <= p; k++) curveKnots.push(Math.max(1, numPts - p));
+            }
+            const realStride = isFlatObj ? 3 : (rawCPs.length % 3 === 0 ? 3 : 4);
+            const numCPsProvided = Math.floor(rawCPs.length / realStride);
+            const cps = [];
+            for (let i = 0; i < numPts; i++) {
+                const idx = (i % numCPsProvided) * realStride;
+                cps.push(new THREE.Vector4(
+                    rawCPs[idx], rawCPs[idx + 1], rawCPs[idx + 2],
+                    realStride === 4 ? rawCPs[idx + 3] : 1.0
+                ));
+            }
+            return new NURBSCurve(p, curveKnots, cps);
+        } catch (e) {
+            console.error('Viewer3D: failed to build NURBSCurve from descriptor', e);
+            return null;
+        }
+    }
+
+    _makePolylineFromDescriptor(data, samples = 100) {
+        const curve = this._makeNurbsCurveFromDescriptor(data);
+        if (!curve) return null;
+        const pts = curve.getPoints(samples);
+        for (const p of pts) {
+            if (isNaN(p.x) || isNaN(p.y) || isNaN(p.z)) p.set(0, 0, 0);
+        }
+        return { curve, pts };
+    }
+
+    _addGuideBindingPolylines(parsed) {
+        const layers = {
+            sec0_polyline: null,
+            sec1_polyline: null,
+            guides_polylines: null,
+        };
+
+        const grpSec0 = new THREE.Group(); grpSec0.name = 'guide_binding_sec0';
+        const grpSec1 = new THREE.Group(); grpSec1.name = 'guide_binding_sec1';
+        const grpGuides = new THREE.Group(); grpGuides.name = 'guide_binding_guides';
+        this.guideBindingGroup = new THREE.Group();
+        this.guideBindingGroup.name = 'guide_binding';
+        this.guideBindingGroup.add(grpSec0, grpSec1, grpGuides);
+        this.scene.add(this.guideBindingGroup);
+
+        const sec0Res = this._makePolylineFromDescriptor(parsed.sec0, 240);
+        if (sec0Res) {
+            const lineGeom = new THREE.BufferGeometry().setFromPoints(sec0Res.pts);
+            const sec0Mat = new THREE.LineBasicMaterial({
+                color: 0xff1744,
+                linewidth: 3,
+                transparent: false,
+                depthTest: true,
+            });
+            const line = new THREE.Line(lineGeom, sec0Mat);
+            line.userData.label = 'sec[0] (degenerate profile)';
+            grpSec0.add(line);
+
+            const ctrlGeom = new THREE.BufferGeometry().setFromPoints(
+                (parsed.sec0.control_points || parsed.sec0.controlPoints || []).map(p => {
+                    if (Array.isArray(p)) return new THREE.Vector3(p[0], p[1], p[2]);
+                    return new THREE.Vector3(p.x, p.y, p.z);
+                })
+            );
+            const ctrlMat = new THREE.LineDashedMaterial({
+                color: 0xff1744,
+                dashSize: 0.05,
+                gapSize: 0.05,
+                transparent: true,
+                opacity: 0.55,
+            });
+            const ctrlLine = new THREE.Line(ctrlGeom, ctrlMat);
+            ctrlLine.computeLineDistances();
+            ctrlLine.userData.label = 'sec[0] control polygon';
+            grpSec0.add(ctrlLine);
+            layers.sec0_polyline = grpSec0;
+            this._guideBinding_sec0Curve = sec0Res.curve;
+        } else {
+            this._guideBinding_sec0Curve = null;
+        }
+
+        const sec1Res = this._makePolylineFromDescriptor(parsed.sec1, 240);
+        if (sec1Res) {
+            const lineGeom = new THREE.BufferGeometry().setFromPoints(sec1Res.pts);
+            const sec1Mat = new THREE.LineBasicMaterial({
+                color: 0x6b6b6b,
+                linewidth: 1,
+                transparent: true,
+                opacity: 0.45,
+                depthTest: true,
+            });
+            const line = new THREE.Line(lineGeom, sec1Mat);
+            line.userData.label = 'sec[1] (regular profile)';
+            grpSec1.add(line);
+            layers.sec1_polyline = grpSec1;
+        }
+
+        parsed.guides.forEach((g, idx) => {
+            const guideRes = this._makePolylineFromDescriptor(g, 80);
+            if (!guideRes) return;
+            const lineGeom = new THREE.BufferGeometry().setFromPoints(guideRes.pts);
+            const guideMat = new THREE.LineBasicMaterial({
+                color: 0xff00ff,
+                linewidth: 1,
+                transparent: true,
+                opacity: 0.7,
+            });
+            const line = new THREE.Line(lineGeom, guideMat);
+            line.userData.label = g.label || `guide_${idx}`;
+            grpGuides.add(line);
+        });
+        if (grpGuides.children.length > 0) layers.guides_polylines = grpGuides;
+
+        return layers;
+    }
+
+    _addGuideBindingResolutions(parsed) {
+        const grp = new THREE.Group();
+        grp.name = 'guide_binding_resolutions';
+        const labels = [];
+        const sec0Curve = this._guideBinding_sec0Curve;
+        const report = parsed.report;
+        if (!report || !Array.isArray(report.guide_resolutions)) {
+            this.guideBindingGroup.add(grp);
+            this._guideBinding_resolutionLayers = { attachment_spheres: grp, attachment_labels: null };
+            return { attachment_spheres: grp, attachment_labels: null };
+        }
+
+        const sphereGeom = new THREE.SphereGeometry(0.07, 16, 16);
+        const labelGroup = new THREE.Group();
+        labelGroup.name = 'guide_binding_resolution_labels';
+
+        for (const r of report.guide_resolutions) {
+            if (!r) continue;
+            const uParam = (typeof r.u_param === 'number') ? r.u_param : null;
+            if (uParam === null) continue;
+            let pos = null;
+            if (Array.isArray(r.original_3d_attachment) && r.original_3d_attachment.length >= 3) {
+                pos = new THREE.Vector3(
+                    r.original_3d_attachment[0],
+                    r.original_3d_attachment[1],
+                    r.original_3d_attachment[2]
+                );
+            }
+            if (!pos && sec0Curve) {
+                const t = sec0Curve.getPoint(Math.max(0, Math.min(1, uParam)));
+                if (t && !isNaN(t.x) && !isNaN(t.y) && !isNaN(t.z)) pos = t.clone();
+            }
+            if (!pos) pos = new THREE.Vector3(0, 0, 0);
+
+            const isFixed = !!r.fixed;
+            const color = isFixed ? 0xff1744 : 0x00aaff;
+            const mat = new THREE.MeshBasicMaterial({
+                color,
+                transparent: true,
+                opacity: 0.95,
+            });
+            const sphere = new THREE.Mesh(sphereGeom, mat);
+            sphere.position.copy(pos);
+            sphere.userData.label = `Guide #${r.guide_index ?? '?'} u=${uParam.toFixed(3)} ${isFixed ? 'FIXED' : 'FREE'}`;
+            sphere.userData.kind = isFixed ? 'fixed' : 'free';
+            grp.add(sphere);
+
+            const curveIdx = (r.segment_index !== undefined) ? r.segment_index : (r.curve_index ?? r.guide_index ?? '?');
+            const tag = `(${curveIdx}, ${uParam.toFixed(2)}, ${isFixed ? 'fixed' : 'free'})`;
+            const sprite = this._makeAnnoSprite(tag, isFixed ? 0xff1744 : 0x00aaff, 1.0);
+            sprite.position.set(pos.x, pos.y + 0.18, pos.z);
+            sprite.userData.label = tag;
+            labelGroup.add(sprite);
+        }
+
+        this.guideBindingGroup.add(grp);
+        this.guideBindingGroup.add(labelGroup);
+        labels.push('attachment_spheres', 'attachment_labels');
+        this._guideBinding_resolutionLayers = {
+            attachment_spheres: grp,
+            attachment_labels: labelGroup,
+        };
+        return this._guideBinding_resolutionLayers;
+    }
+
+    _addGuideBindingSegments(parsed) {
+        const grp = new THREE.Group();
+        grp.name = 'guide_binding_degenerate_segments';
+        const report = parsed.report;
+        if (!report || !Array.isArray(report.degenerate_segments) || !parsed.sec0) {
+            this.guideBindingGroup.add(grp);
+            this._guideBinding_segmentLayer = grp;
+            return grp;
+        }
+        const sec0Curve = this._guideBinding_sec0Curve;
+        const samples = 200;
+        const fullPolyline = sec0Curve ? sec0Curve.getPoints(samples) : null;
+        if (!fullPolyline) {
+            this.guideBindingGroup.add(grp);
+            this._guideBinding_segmentLayer = grp;
+            return grp;
+        }
+        const lineMat = new THREE.LineBasicMaterial({
+            color: 0xffeb3b,
+            linewidth: 4,
+            transparent: true,
+            opacity: 0.85,
+        });
+        for (const seg of report.degenerate_segments) {
+            if (!seg) continue;
+            const uLo = (typeof seg.u_lo === 'number') ? seg.u_lo : 0;
+            const uHi = (typeof seg.u_hi === 'number') ? seg.u_hi : 1;
+            const loIdx = Math.max(0, Math.min(samples, Math.round(uLo * samples)));
+            const hiIdx = Math.max(loIdx + 1, Math.min(samples, Math.round(uHi * samples)));
+            const pts = fullPolyline.slice(loIdx, hiIdx + 1);
+            if (pts.length < 2) continue;
+            const geom = new THREE.BufferGeometry().setFromPoints(pts);
+            const line = new THREE.Line(geom, lineMat);
+            line.userData.label = `degenerate [${uLo.toFixed(2)}, ${uHi.toFixed(2)}]`;
+            grp.add(line);
+        }
+        this.guideBindingGroup.add(grp);
+        this._guideBinding_segmentLayer = grp;
+        return grp;
+    }
+
+    /**
+     * Spec 0004 renderer: sec[0] highlighted + dashed control polygon,
+     * sec[1] dimmed, guide curves in magenta, degenerate-segment highlight
+     * strips along sec[0], and per-resolution spheres (red=fixed, cyan=free)
+     * with `(curve_idx, u_param, fixed/free)` sprite labels.
+     */
+    loadGuideBinding(parsed) {
+        if (this.guideBindingGroup) {
+            this.scene.remove(this.guideBindingGroup);
+            this.guideBindingGroup.traverse(c => {
+                if (c.geometry) c.geometry.dispose();
+                if (c.material) {
+                    if (Array.isArray(c.material)) c.material.forEach(m => m.dispose());
+                    else c.material.dispose();
+                }
+            });
+        }
+        this._guideBinding_sec0Curve = null;
+        this._guideBinding_segmentLayer = null;
+        this._guideBinding_resolutionLayers = null;
+
+        const polylineLayers = this._addGuideBindingPolylines(parsed);
+        const segmentLayer = this._addGuideBindingSegments(parsed);
+        const resolutionLayers = this._addGuideBindingResolutions(parsed);
+
+        const bbox = new THREE.Box3();
+        if (this.guideBindingGroup) bbox.expandByObject(this.guideBindingGroup);
+
+        if (!bbox.isEmpty()) {
+            const center = new THREE.Vector3(); bbox.getCenter(center);
+            const offset = center.clone().multiplyScalar(-1);
+            this.guideBindingGroup.position.copy(offset);
+            this.markersGroup.position.copy(offset);
+            this.nurbsGroup.position.copy(offset);
+            this.auditGroup.position.copy(offset);
+            const size = bbox.getSize(new THREE.Vector3()).length();
+            this.camera.position.set(size, size, size);
+            this.controls.target.set(0, 0, 0);
+            this.controls.update();
+        }
+
+        const surfaceLabels = [];
+        const curveLabels = [];
+        if (polylineLayers.sec0_polyline) curveLabels.push('sec[0] (degenerate)');
+        if (polylineLayers.sec1_polyline) curveLabels.push('sec[1] (regular)');
+        if (polylineLayers.guides_polylines) curveLabels.push('guides');
+        const guideBindingLayers = [
+            'degenerate_segments',
+            'attachment_spheres',
+            'attachment_labels',
+        ];
+        const auditLayers = parsed.audit ? ['heatmaps', 'couplings', 'debug_markers'] : [];
+        return { surfaceLabels, curveLabels, guideBindingLayers, auditLayers };
+    }
+
+    setGuideBindingLayer(layerKey, visible) {
+        const layers = this._guideBinding_resolutionLayers || {};
+        const segLayer = this._guideBinding_segmentLayer;
+        if (layerKey === 'degenerate_segments' && segLayer) {
+            segLayer.visible = visible;
+        } else if (layerKey === 'attachment_spheres' && layers.attachment_spheres) {
+            layers.attachment_spheres.visible = visible;
+        } else if (layerKey === 'attachment_labels' && layers.attachment_labels) {
+            layers.attachment_labels.visible = visible;
+        }
+    }
 }
 

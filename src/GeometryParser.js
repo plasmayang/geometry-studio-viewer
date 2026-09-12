@@ -46,6 +46,42 @@ export class GeometryParser {
         };
     }
 
+    /**
+     * Parse a spec 0004 (e2e-gluing-guide-to-profile) envelope into
+     * the shape Viewer3D.loadGuideBinding() expects:
+     *   {
+     *     sec0: NURBS curve descriptor for the degenerate profile,
+     *     sec1: NURBS curve descriptor for the regular profile (may be null),
+     *     guides: [NURBS curve descriptor, ...] for every guide curve,
+     *     report: { u_bounds, degenerate_segments, guide_resolutions, monotone_check, guide_count },
+     *     audit: existing audit fields (process / intermediate / debug_markers) when present
+     *   }
+     *
+     * Falls back gracefully: if sec0/sec1/guides are missing the
+     * corresponding field is null / []; Viewer3D renders what it can.
+     */
+    static parseGuideBinding(jsonData) {
+        const curves = (jsonData?.geometry?.nurbs?.curves) || [];
+        let sec0 = null;
+        let sec1 = null;
+        const guides = [];
+        for (const c of curves) {
+            if (!c || !c.label) continue;
+            if (c.label === 'section_0' || c.label.startsWith('section_0')) {
+                sec0 = c;
+            } else if (c.label === 'section_1' || c.label.startsWith('section_1')) {
+                sec1 = c;
+            } else if (c.label.startsWith('guide')) {
+                guides.push(c);
+            }
+        }
+        const report = (jsonData.guide_binding_report && typeof jsonData.guide_binding_report === 'object')
+            ? jsonData.guide_binding_report
+            : null;
+        const audit = this.parseAudit(jsonData);
+        return { sec0, sec1, guides, report, audit };
+    }
+
     static parseNurbs(jsonData) {
         if (jsonData.surfaces || jsonData.surface || jsonData.curves || jsonData.support_surfaces || jsonData.constraint_visualizations) {
             const surfaces = [];

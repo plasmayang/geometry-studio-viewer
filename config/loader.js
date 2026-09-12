@@ -78,6 +78,11 @@ function _validateMode(cfg) {
 /**
  * Resolve the active directory-mode profile. Throws when mode is
  * not 'directory' or the active profile is missing.
+ *
+ * `opts.profile` overrides the config's default `profile` field,
+ * which lets each HTML entry pick its own data source via a
+ * `?profile=<name>` query parameter (browser) or an equivalent
+ * programmatic override (server).
  */
 export function getDirectoryProfile(opts = {}) {
     const cfg = loadViewerConfig(opts);
@@ -86,7 +91,7 @@ export function getDirectoryProfile(opts = {}) {
         throw new Error(
             `[viewer-config] getDirectoryProfile() called but mode=${JSON.stringify(cfg.mode)}; expected 'directory'`);
     }
-    const name = cfg.profile;
+    const name = opts.profile || cfg.profile;
     const profile = cfg.profiles && cfg.profiles[name];
     if (!profile) {
         throw new Error(
@@ -102,6 +107,34 @@ export function getDirectoryProfile(opts = {}) {
         data_root: _resolveDataRoot(viewerRoot, profile),
         data_root_relative: profile.data_root,
     };
+}
+
+/**
+ * Resolve every directory-mode profile as a list (preserving
+ * declaration order). Used by vite.config.js to mount one data
+ * bridge per profile so each HTML entry can route to its own
+ * data_root via the matching `url_prefix`.
+ */
+export function listDirectoryProfiles(opts = {}) {
+    const cfg = loadViewerConfig(opts);
+    _validateMode(cfg);
+    if (cfg.mode !== "directory") {
+        throw new Error(
+            `[viewer-config] listDirectoryProfiles() called but mode=${JSON.stringify(cfg.mode)}; expected 'directory'`);
+    }
+    const viewerRoot = path.resolve(process.cwd());
+    const out = [];
+    for (const [name, profile] of Object.entries(cfg.profiles || {})) {
+        out.push({
+            name,
+            description: profile.description || "",
+            url_prefix: profile.url_prefix || "/kernel-data",
+            manifest_path: profile.manifest_path || "manifest.json",
+            data_root: _resolveDataRoot(viewerRoot, profile),
+            data_root_relative: profile.data_root,
+        });
+    }
+    return out;
 }
 
 /**

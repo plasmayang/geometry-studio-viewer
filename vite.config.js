@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import {
     loadViewerConfig,
     getDirectoryProfile,
+    listDirectoryProfiles,
     getRuntimeConfig,
 } from './config/loader.js';
 
@@ -67,7 +68,13 @@ export default defineConfig({
         }
     },
     build: {
-        outDir: 'dist'
+        outDir: 'dist',
+        rollupOptions: {
+            input: {
+                main: path.resolve(__dirname, 'index.html'),
+                'guide-binding': path.resolve(__dirname, 'guide-binding.html'),
+            },
+        },
     },
     // Expose the runtime config to the browser so src/main.js can
     // dispatch on mode. server-side fields (data_root) are stripped.
@@ -78,19 +85,23 @@ export default defineConfig({
         {
             name: 'kernel-data-bridge',
             configureServer(server) {
-                const profile = getDirectoryProfile();
-                if (!fs.existsSync(profile.data_root)) {
-                    console.warn(
-                        `[kernel-data-bridge] data_root does not exist: ${profile.data_root}\n` +
-                        `  Run kernel-app Gallery or pick a different profile.`
+                // Order matters: mount per-profile middlewares in
+                // declaration order so the first matching url_prefix wins.
+                const profiles = listDirectoryProfiles();
+                for (const profile of profiles) {
+                    if (!fs.existsSync(profile.data_root)) {
+                        console.warn(
+                            `[kernel-data-bridge] data_root does not exist: ${profile.data_root}\n` +
+                            `  Run kernel-app Gallery / gluing-guide-to-profile e2e or pick a different profile.`
+                        );
+                        continue;
+                    }
+                    server.middlewares.use(profile.url_prefix, makeDataBridge(profile));
+                    console.info(
+                        `[kernel-data-bridge] mode=directory ` +
+                        `profile=${profile.name} ${profile.url_prefix} -> ${profile.data_root}`
                     );
-                    return;
                 }
-                server.middlewares.use(profile.url_prefix, makeDataBridge(profile));
-                console.info(
-                    `[kernel-data-bridge] mode=directory ` +
-                    `profile=${profile.name} ${profile.url_prefix} -> ${profile.data_root}`
-                );
             }
         }
     ] : [
