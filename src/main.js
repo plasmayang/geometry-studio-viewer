@@ -342,11 +342,18 @@ class App {
             return;
         }
 
-        const { geometry, markers, nurbs, audit } = GeometryParser.parseMesh(jsonData);
+        const { geometry, markers, nurbs, audit, movingFrame, samplingPlane } = GeometryParser.parseMesh(jsonData);
+        // spec 0002: bundle aux-viz arrays; loadMesh builds the
+        // groups AFTER bbox is known (scale = 0.1 × bbox_diagonal).
+        const extras = { movingFrame, samplingPlane };
         const { surfaceLabels, curveLabels, auditLayers } =
-            this.viewer.loadMesh(geometry, markers, nurbs, audit);
+            this.viewer.loadMesh(geometry, markers, nurbs, audit, extras);
 
         if (this.ui) {
+            // spec 0002: cache envelope BEFORE updateCurveToggles so
+            // _buildInputGeometryBucket can detect moving_frame /
+            // sampling_plane and inject spine-auxViz siblings.
+            this.ui.setEnvelope(jsonData);
             this.ui.updateSurfaceToggles(surfaceLabels, (label, visible) => {
                 this.viewer.setSurfaceVisibility(label, visible);
             });

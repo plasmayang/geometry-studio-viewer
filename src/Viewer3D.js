@@ -80,7 +80,7 @@ export class Viewer3D {
         this.renderer.render(this.scene, this.camera);
     }
 
-    loadMesh(geometry, markers = [], nurbs = null, audit = null) {
+    loadMesh(geometry, markers = [], nurbs = null, audit = null, extras = null) {
         if (this.mesh) {
             this.scene.remove(this.mesh);
             if (this.normalsHelper) this.scene.remove(this.normalsHelper);
@@ -116,8 +116,8 @@ export class Viewer3D {
 
         // v1.1 audit data — only the heatmap layer survives here; the
         // 2D nominal manifold is rendered as a regular surface (see
-        // GeometryParser.parseNurbs) so it shares the FreeBlend3D /
-        // AffineTransport toggle rail.
+        // GeometryParser.parseNurbs) so its visibility is controlled
+        // by the NominalManifold toggle in the Output Surfaces panel.
         if (audit && audit.process) {
             this._addAuditHeatmaps(audit.process);
         }
@@ -172,6 +172,20 @@ export class Viewer3D {
         }
         bbox.expandByObject(this.auditGroup);
 
+        // spec 0002: fold station origins into the bbox so open envelopes
+        // (spine outside the mesh) still get a sane per-axis scale.
+        const auxStations = [
+            ...((extras && Array.isArray(extras.movingFrame)) ? extras.movingFrame : []),
+            ...((extras && Array.isArray(extras.samplingPlane)) ? extras.samplingPlane : []),
+        ];
+        for (const st of auxStations) {
+            if (st && Array.isArray(st.origin) && st.origin.length >= 3
+                && !isNaN(st.origin[0]) && !isNaN(st.origin[1]) && !isNaN(st.origin[2])) {
+                bbox.expandByPoint(new THREE.Vector3(st.origin[0], st.origin[1], st.origin[2]));
+            }
+        }
+
+        let bboxDiagonal = 0;
         if (!bbox.isEmpty()) {
             const center = new THREE.Vector3(); bbox.getCenter(center);
             const offset = center.clone().multiplyScalar(-1);
@@ -179,9 +193,24 @@ export class Viewer3D {
             this.nurbsGroup.position.copy(offset);
             this.auditGroup.position.copy(offset);
             const size = bbox.getSize(new THREE.Vector3()).length();
+            bboxDiagonal = size;
             this.camera.position.set(size, size, size);
             this.controls.target.set(0, 0, 0);
             this.controls.update();
+        }
+
+        // spec 0002: aux-viz must be built AFTER bboxDiagonal is known
+        // (scale = 0.1 × bboxDiagonal, per spec). Parent groups live in
+        // surfaceGroups so the existing setSurfaceVisibility toggle path
+        // drives visibility — no new callback wiring needed.
+        const auxScale = 0.1 * bboxDiagonal;
+        if (extras && Array.isArray(extras.movingFrame) && extras.movingFrame.length > 0) {
+            this.addMovingFrame(extras.movingFrame, auxScale);
+            labels.push('Moving Frame');
+        }
+        if (extras && Array.isArray(extras.samplingPlane) && extras.samplingPlane.length > 0) {
+            this.addSamplingPlane(extras.samplingPlane, auxScale);
+            labels.push('Sampling Plane');
         }
 
         return {
@@ -425,6 +454,72 @@ export class Viewer3D {
             });
         }
         return labels;
+    }
+
+    // ---- spec 0002 (v1.2): spine moving-frame / sampling-plane viz ----
+
+    /**
+     * Per-station 3 line segments: origin → origin + scale * {T, N, B}.
+     * Colors per spec: tangent=red(0xff3366), normal=green(0x33ff66),
+     * binormal=blue(0x3366ff). Stations with non-array origin / axes
+     * are silently skipped (defensive against malformed envelopes).
+     */
+    addMovingFrame(movingFrame, bboxDiagonal) {
+        if (!Array.isArray(movingFrame) || movingFrame.length === 0) return;
+        const scale = bboxDiagonal;
+        const colors = { tangent: 0xff3366, normal: 0x33ff66, binormal: 0x3366ff };
+        const parent = new THREE.Group();
+        parent.name = 'Moving Frame';
+        this.surfaceGroups['Moving Frame'] = parent;
+        this.nurbsGroup.add(parent);
+
+        for (const station of movingFrame) {
+            if (!station || !Array.isArray(station.origin) || station.origin.length < 3) continue;
+            const origin = new THREE.Vector3(station.origin[0], station.origin[1], station.origin[2]);
+            for (const axis of ['tangent', 'normal', 'binormal']) {
+                const dir = station[axis];
+                if (!Array.isArray(dir) || dir.length < 3) continue;
+                const end = origin.clone().addScaledVector(
+                    new THREE.Vector3(dir[0], dir[1], dir[2]), scale);
+                const geom = new THREE.BufferGeometry().setFromPoints([origin, end]);
+                parent.add(new THREE.Line(geom, new THREE.LineBasicMaterial({ color: colors[axis] })));
+            }
+        }
+    }
+
+    /**
+     * Per-station rectangle line-loop: 4 vertices = origin, origin+u,
+     * origin+u+v, origin+v, back to origin. Color: orange 0xff8800
+     * (matches the existing "tangent_ribbon" convention). Skip
+     * stations whose axis_u or axis_v is the zero vector (degenerate
+     * spine tangent → per spec field rule §5).
+     */
+    addSamplingPlane(samplingPlane, bboxDiagonal) {
+        if (!Array.isArray(samplingPlane) || samplingPlane.length === 0) return;
+        const scale = bboxDiagonal;
+        const mat = new THREE.LineBasicMaterial({ color: 0xff8800 });
+        const parent = new THREE.Group();
+        parent.name = 'Sampling Plane';
+        this.surfaceGroups['Sampling Plane'] = parent;
+        this.nurbsGroup.add(parent);
+
+        for (const station of samplingPlane) {
+            if (!station) continue;
+            const u = station.axis_u, v = station.axis_v;
+            if (!Array.isArray(u) || u.length < 3 || !Array.isArray(v) || v.length < 3) continue;
+            if (u[0]*u[0] + u[1]*u[1] + u[2]*u[2] < 1e-12) continue;
+            if (v[0]*v[0] + v[1]*v[1] + v[2]*v[2] < 1e-12) continue;
+            if (!Array.isArray(station.origin) || station.origin.length < 3) continue;
+            const o = new THREE.Vector3(station.origin[0], station.origin[1], station.origin[2]);
+            const du = new THREE.Vector3(u[0], u[1], u[2]).multiplyScalar(scale);
+            const dv = new THREE.Vector3(v[0], v[1], v[2]).multiplyScalar(scale);
+            const a = o.clone();
+            const b = o.clone().add(du);
+            const c = o.clone().add(du).add(dv);
+            const d = o.clone().add(dv);
+            const geom = new THREE.BufferGeometry().setFromPoints([a, b, c, d]);
+            parent.add(new THREE.LineLoop(geom, mat));
+        }
     }
 
     // ---- v1.1 audit-data overlay renderers --------------------------------

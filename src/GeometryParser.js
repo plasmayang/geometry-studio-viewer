@@ -43,7 +43,25 @@ export class GeometryParser {
             markers,
             nurbs: this.parseNurbs(jsonData),
             audit: this.parseAudit(jsonData),
+            // spec 0002 (v1.2): null when absent so v1.1 envelopes
+            // bypass the aux-viz pass and skip the toggle injection.
+            movingFrame: this.parseMovingFrame(jsonData),
+            samplingPlane: this.parseSamplingPlane(jsonData),
         };
+    }
+
+    /** spec 0002: top-level `moving_frame[]` (one per spine v-station). */
+    static parseMovingFrame(jsonData) {
+        const arr = jsonData?.moving_frame;
+        if (!Array.isArray(arr) || arr.length === 0) return null;
+        return arr;
+    }
+
+    /** spec 0002: top-level `sampling_plane[]`, index-aligned with moving_frame. */
+    static parseSamplingPlane(jsonData) {
+        const arr = jsonData?.sampling_plane;
+        if (!Array.isArray(arr) || arr.length === 0) return null;
+        return arr;
     }
 
     /**

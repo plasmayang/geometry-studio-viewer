@@ -1,5 +1,17 @@
 [
   {
+    "file": "cases100/spine_moving_frame_demo.json",
+    "id": "spine_moving_frame_demo",
+    "name": "Spine Moving Frame Demo (synthetic v1.2 fixture)",
+    "tags": ["spec:0002", "spine:moving-frame", "spine:sampling-plane", "_test_fixture"]
+  },
+  {
+    "file": "cases100/case1.json",
+    "id": "v11_case1",
+    "name": "v1.1 case1 (backward compat — no moving_frame / sampling_plane)",
+    "tags": ["compat:v1.1"]
+  },
+  {
     "file": "generated_cases/variational_fairing.json",
     "id": "variational_fairing",
     "name": "Fairing ON: Variational Smoothing",
