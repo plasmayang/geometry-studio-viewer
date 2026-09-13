@@ -124,6 +124,23 @@ export class UIController {
             }
         });
 
+        // Intermediate Geometry (v1.2+): guide-curve × sampling-plane
+        // intersection points from `intermediate_products.v_samples[]`.
+        // main.js wires the toggle via updateIntermediateGeometry(); when
+        // the case has no v_samples data main.js skips that call and the
+        // checkbox is a no-op.
+        this.intermediateGeometryFolder = this.pane.addFolder({
+            title: 'Intermediate Geometry',
+            expanded: true,
+        });
+        this.intermediateGeometryParams = { vSamples: false };
+        this.intermediateGeometryFolder.addBinding(this.intermediateGeometryParams, 'vSamples', {
+            label: 'v-samples'
+        }).on('change', (ev) => {
+            const cb = this._onIntermediateToggle || callbacks.onIntermediateToggle;
+            if (cb) cb('v_samples', ev.value);
+        });
+
         this.surfaceFolder = this.pane.addFolder({
             title: 'Input Geometries',
             expanded: true
@@ -214,6 +231,19 @@ export class UIController {
                 keyVector: this._lastSurfaceToggle || onCurveToggle,
             },
         );
+    }
+
+    /**
+     * Wire the Intermediate Geometry folder's v-samples checkbox
+     * callback. Called by main.js after each case-render; if the case
+     * has no v_samples data main.js skips this call and the toggle
+     * is a no-op (the folder stays present but inert).
+     */
+    updateIntermediateGeometry(callback) {
+        this._onIntermediateToggle = callback;
+        if (this.intermediateGeometryParams) {
+            this.intermediateGeometryParams.vSamples = false;
+        }
     }
 
     /**

@@ -110,6 +110,9 @@ class App {
                         this.viewer.surfaceGroups[mode].visible = visible;
                     }
                 },
+                onIntermediateToggle: (label, visible) => {
+                    if (label === 'v_samples') this.viewer.setVSamplesVisibility(visible);
+                },
                 ...baseCallbacks,
             });
         } else {
@@ -363,6 +366,15 @@ class App {
             this.ui.updateAuditPanel(auditLayers, audit, (layerKey, visible) => {
                 this.viewer.setAuditLayer(layerKey, visible);
             });
+            // Intermediate Geometry (v-samples): only wire when the case
+            // actually carries v_samples data. When absent the folder's
+            // checkbox stays inert (no-op toggle).
+            const vSamplesData = Array.isArray(nurbs?.vSamples) ? nurbs.vSamples : [];
+            if (vSamplesData.length > 0) {
+                this.ui.updateIntermediateGeometry((label, visible) => {
+                    if (label === 'v_samples') this.viewer.setVSamplesVisibility(visible);
+                });
+            }
         }
     }
 

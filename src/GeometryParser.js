@@ -101,6 +101,10 @@ export class GeometryParser {
     }
 
     static parseNurbs(jsonData) {
+        // v1.2: include guide-curve × sampling-plane intersection points
+        // (see parseVSamples for the contract). Always present (possibly
+        // empty) so consumers can rely on the key.
+        const vSamples = this.parseVSamples(jsonData);
         if (jsonData.surfaces || jsonData.surface || jsonData.curves || jsonData.support_surfaces || jsonData.constraint_visualizations) {
             const surfaces = [];
             // iter-review-25 §3.3.1: prefer the plural 'surfaces' array
@@ -139,11 +143,36 @@ export class GeometryParser {
             }
             return {
                 surfaces: surfaces,
-                curves: jsonData.curves || []
+                curves: jsonData.curves || [],
+                vSamples: vSamples,
             };
         }
-        if (!jsonData.geometry || !jsonData.geometry.nurbs) return null;
-        return jsonData.geometry.nurbs;
+        if (!jsonData.geometry || !jsonData.geometry.nurbs) {
+            return { surfaces: [], curves: [], vSamples: vSamples };
+        }
+        return { ...jsonData.geometry.nurbs, vSamples: vSamples };
+    }
+
+    /**
+     * Parse `intermediate_products.v_samples[]` (e2e-gallery writer
+     * output) into a flat list of `{x, y, z}` point records. Each input
+     * entry carries `{guide_index, v_index, v_param, u_param,
+     * position: [x, y, z]}` — only `position` is needed by the Points
+     * renderer. Records with malformed/missing positions are silently
+     * dropped (defensive against producer edge cases). Returns [] when
+     * `intermediate_products` or `v_samples` is absent.
+     */
+    static parseVSamples(jsonData) {
+        const list = jsonData?.intermediate_products?.v_samples;
+        if (!Array.isArray(list) || list.length === 0) return [];
+        const out = [];
+        for (const raw of list) {
+            if (!raw || !Array.isArray(raw.position) || raw.position.length < 3) continue;
+            const x = raw.position[0], y = raw.position[1], z = raw.position[2];
+            if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+            out.push({ x, y, z });
+        }
+        return out;
     }
 
     /**

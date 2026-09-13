@@ -19,6 +19,7 @@ export class Viewer3D {
         this.auditGroup = new THREE.Group();
         this.surfaceGroups = {};
         this.auditLayers = {};
+        this.vSamplesPoints = null;
 
         this.scene.add(this.markersGroup);
         this.scene.add(this.nurbsGroup);
@@ -99,6 +100,10 @@ export class Viewer3D {
             }
         });
 
+        // vSamplesPoints (added to nurbsGroup) is disposed by the loop
+        // above; null the reference so callers don't touch the disposed object.
+        this.vSamplesPoints = null;
+
         this.surfaceGroups = {};
         this.auditLayers = {};
         const labels = [];
@@ -112,6 +117,9 @@ export class Viewer3D {
         if (nurbs) {
             const surfaceLabels = this.addNurbs(nurbs);
             labels.push(...surfaceLabels);
+        }
+        if (nurbs && Array.isArray(nurbs.vSamples) && nurbs.vSamples.length > 0) {
+            this.addVSamplesPoints(nurbs.vSamples);
         }
 
         // v1.1 audit data — only the heatmap layer survives here; the
@@ -171,6 +179,10 @@ export class Viewer3D {
             });
         }
         bbox.expandByObject(this.auditGroup);
+        if (this.vSamplesPoints && this.vSamplesPoints.geometry
+            && this.vSamplesPoints.geometry.attributes.position) {
+            bbox.expandByObject(this.vSamplesPoints);
+        }
 
         // spec 0002: fold station origins into the bbox so open envelopes
         // (spine outside the mesh) still get a sane per-axis scale.
@@ -522,6 +534,44 @@ export class Viewer3D {
         }
     }
 
+    /**
+     * Build a THREE.Points cloud from `intermediate_products.v_samples`
+     * records (each `{x, y, z}`). Stored in `this.vSamplesPoints` and
+     * parented to nurbsGroup so the standard bbox-offset pass keeps it
+     * aligned with the rest of the geometry. Hidden by default; toggled
+     * via setVSamplesVisibility. Color: magenta 0xff00ff (matches the
+     * guide curve color so the points visually associate with their
+     * parent guides). Size 3px with sizeAttenuation off so the dots stay
+     * legible regardless of camera distance.
+     */
+    addVSamplesPoints(points) {
+        if (!Array.isArray(points) || points.length === 0) return;
+        const positions = new Float32Array(points.length * 3);
+        let writeIdx = 0;
+        for (const p of points) {
+            if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) continue;
+            positions[writeIdx++] = p.x;
+            positions[writeIdx++] = p.y;
+            positions[writeIdx++] = p.z;
+        }
+        if (writeIdx === 0) return;
+        const trimmed = writeIdx === positions.length
+            ? positions
+            : positions.slice(0, writeIdx);
+        const geom = new THREE.BufferGeometry();
+        geom.setAttribute('position', new THREE.BufferAttribute(trimmed, 3));
+        const mat = new THREE.PointsMaterial({
+            color: 0xff00ff,
+            size: 3,
+            sizeAttenuation: false,
+        });
+        const pts = new THREE.Points(geom, mat);
+        pts.name = 'v_samples';
+        pts.visible = false;
+        this.vSamplesPoints = pts;
+        this.nurbsGroup.add(pts);
+    }
+
     // ---- v1.1 audit-data overlay renderers --------------------------------
 
     // Per-profile / per-guide deviation heatmap: color a small sphere
@@ -838,6 +888,10 @@ export class Viewer3D {
         if (this.auditLayers[layerKey]) {
             this.auditLayers[layerKey].visible = visible;
         }
+    }
+
+    setVSamplesVisibility(visible) {
+        if (this.vSamplesPoints) this.vSamplesPoints.visible = visible;
     }
 
     setSurfaceVisibility(label, visible) {
