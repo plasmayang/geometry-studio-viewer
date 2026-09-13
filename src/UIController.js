@@ -133,12 +133,18 @@ export class UIController {
             title: 'Intermediate Geometry',
             expanded: true,
         });
-        this.intermediateGeometryParams = { vSamples: false };
+        this.intermediateGeometryParams = { vSamples: false, vSections: false };
         this.intermediateGeometryFolder.addBinding(this.intermediateGeometryParams, 'vSamples', {
             label: 'v-samples'
         }).on('change', (ev) => {
             const cb = this._onIntermediateToggle || callbacks.onIntermediateToggle;
             if (cb) cb('v_samples', ev.value);
+        });
+        this.intermediateGeometryFolder.addBinding(this.intermediateGeometryParams, 'vSections', {
+            label: 'v-sections'
+        }).on('change', (ev) => {
+            const cb = this._onIntermediateToggle || callbacks.onIntermediateToggle;
+            if (cb) cb('v_sections', ev.value);
         });
 
         this.surfaceFolder = this.pane.addFolder({
@@ -243,6 +249,7 @@ export class UIController {
         this._onIntermediateToggle = callback;
         if (this.intermediateGeometryParams) {
             this.intermediateGeometryParams.vSamples = false;
+            this.intermediateGeometryParams.vSections = false;
         }
     }
 

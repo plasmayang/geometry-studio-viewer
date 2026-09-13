@@ -20,6 +20,7 @@ export class Viewer3D {
         this.surfaceGroups = {};
         this.auditLayers = {};
         this.vSamplesPoints = null;
+        this.vSectionLines = [];
 
         this.scene.add(this.markersGroup);
         this.scene.add(this.nurbsGroup);
@@ -103,6 +104,9 @@ export class Viewer3D {
         // vSamplesPoints (added to nurbsGroup) is disposed by the loop
         // above; null the reference so callers don't touch the disposed object.
         this.vSamplesPoints = null;
+        // vSectionLines (children of nurbsGroup) follow the same disposal
+        // path; clear the cache so callers don't toggle disposed objects.
+        this.vSectionLines = [];
 
         this.surfaceGroups = {};
         this.auditLayers = {};
@@ -120,6 +124,9 @@ export class Viewer3D {
         }
         if (nurbs && Array.isArray(nurbs.vSamples) && nurbs.vSamples.length > 0) {
             this.addVSamplesPoints(nurbs.vSamples);
+        }
+        if (nurbs && Array.isArray(nurbs.vSections) && nurbs.vSections.length > 0) {
+            this.addVSectionsCurves(nurbs.vSections);
         }
 
         // v1.1 audit data — only the heatmap layer survives here; the
@@ -182,6 +189,13 @@ export class Viewer3D {
         if (this.vSamplesPoints && this.vSamplesPoints.geometry
             && this.vSamplesPoints.geometry.attributes.position) {
             bbox.expandByObject(this.vSamplesPoints);
+        }
+        if (Array.isArray(this.vSectionLines) && this.vSectionLines.length > 0) {
+            for (const ln of this.vSectionLines) {
+                if (ln && ln.geometry && ln.geometry.attributes.position) {
+                    bbox.expandByObject(ln);
+                }
+            }
         }
 
         // spec 0002: fold station origins into the bbox so open envelopes
@@ -572,6 +586,130 @@ export class Viewer3D {
         this.nurbsGroup.add(pts);
     }
 
+    /**
+     * Build THREE.Line objects (one per v-station) from NURBS curve
+     * descriptors stored in `intermediate_products.v_sections[]`.
+     * Each curve is resampled at 64 points along [u_min, u_max] using
+     * Cox-de-Boor B-spline basis evaluation; rational curves (dim=4)
+     * divide by the homogeneous weight sum. Color: cyan 0x00ffff to
+     * contrast with magenta v_samples (0xff00ff) and sampling-plane
+     * orange (0xff8800). Hidden by default; toggled via
+     * setVSectionsVisibility. Malformed descriptors (missing knots_u /
+     * control_points / p_u, or empty CPs) are silently skipped.
+     */
+    addVSectionsCurves(curves) {
+        if (!Array.isArray(curves) || curves.length === 0) return;
+        const SAMPLES = 64;
+        const mat = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 1 });
+        for (const c of curves) {
+            if (!c || typeof c !== 'object') continue;
+            const p = (typeof c.p_u === 'number') ? c.p_u : null;
+            const knots = Array.isArray(c.knots_u) ? c.knots_u : null;
+            const cps = Array.isArray(c.control_points) ? c.control_points : null;
+            const dim = (typeof c.dim === 'number') ? c.dim : 3;
+            if (p === null || knots === null || cps === null) continue;
+            if (knots.length < p + 2 || cps.length === 0) continue;
+            const rational = (dim === 4);
+            const stride = rational ? 4 : 3;
+            const numCPs = Math.floor(cps.length / stride);
+            if (numCPs < p + 1) continue;
+            const uMin = (typeof c.u_min === 'number') ? c.u_min : knots[p];
+            const uMax = (typeof c.u_max === 'number') ? c.u_max : knots[knots.length - p - 1];
+            if (!(uMax > uMin)) continue;
+            const positions = new Float32Array(SAMPLES * 3);
+            for (let s = 0; s < SAMPLES; s++) {
+                const t = uMin + (uMax - uMin) * (s / (SAMPLES - 1));
+                const pt = this._evalBSplineCurve(t, p, knots, cps, numCPs, stride, rational);
+                positions[s * 3]     = pt[0];
+                positions[s * 3 + 1] = pt[1];
+                positions[s * 3 + 2] = pt[2];
+            }
+            const geom = new THREE.BufferGeometry();
+            geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            const line = new THREE.Line(geom, mat);
+            const idxLabel = (typeof c.v_index === 'number') ? c.v_index : '?';
+            line.name = `v_section_${idxLabel}`;
+            line.userData.label = `v_section v_index=${idxLabel} v=${(typeof c.v === 'number') ? c.v.toFixed(3) : '?'}`;
+            line.userData.kind = 'v_section';
+            line.visible = false;
+            this.vSectionLines.push(line);
+            this.nurbsGroup.add(line);
+        }
+    }
+
+    /**
+     * Cox-de-Boor evaluation of a (possibly rational) B-spline curve at
+     * parameter `t`. Returns a 3-component array [x, y, z]. Algorithm:
+     *   1. Find span s.t. knots[s] <= t < knots[s+1]; clamp to last
+     *      valid span when t == u_max (the standard edge case).
+     *   2. Compute p+1 non-zero B-spline basis values via the
+     *      de-Boor recursion table.
+     *   3. For rational curves, divide the weighted CP sum by the
+     *      sum of weights; for non-rational curves, take the direct
+     *      linear combination over CPs [s-p..s].
+     */
+    _evalBSplineCurve(t, p, knots, cps, numCPs, stride, rational) {
+        const n = knots.length - 1;
+        let s = 0;
+        for (let i = p; i < n - p; i++) {
+            if (knots[i] <= t && t < knots[i + 1]) { s = i; break; }
+            if (i === n - p - 1 && t >= knots[i + 1]) s = i;
+        }
+        const basis = this._bSplineBasis(p, t, s, knots);
+        const offset = (s - p) * stride;
+        let x, y, z, w;
+        if (rational) {
+            let wx = 0, wy = 0, wz = 0, wsum = 0;
+            for (let j = 0; j <= p; j++) {
+                const idx = offset + j * stride;
+                w = cps[idx + 3];
+                wx += basis[j] * cps[idx]     * w;
+                wy += basis[j] * cps[idx + 1] * w;
+                wz += basis[j] * cps[idx + 2] * w;
+                wsum += basis[j] * w;
+            }
+            if (Math.abs(wsum) < 1e-12) { x = y = z = 0; }
+            else { x = wx / wsum; y = wy / wsum; z = wz / wsum; }
+        } else {
+            x = y = z = 0;
+            for (let j = 0; j <= p; j++) {
+                const idx = offset + j * stride;
+                x += basis[j] * cps[idx];
+                y += basis[j] * cps[idx + 1];
+                z += basis[j] * cps[idx + 2];
+            }
+        }
+        return [x, y, z];
+    }
+
+    /**
+     * Standard Cox-de-Boor recursion: returns an array of length p+1
+     * containing the non-zero basis values N_{s-p, p}(t) .. N_{s, p}(t)
+     * at parameter `t` for span index `s`. Uses left/right temporary
+     * arrays (the "The NURBS Book" Algorithm A2.2 formulation).
+     */
+    _bSplineBasis(p, t, s, knots) {
+        const N = new Float64Array(p + 1);
+        const left = new Float64Array(p + 1);
+        const right = new Float64Array(p + 1);
+        N[0] = 1.0;
+        for (let i = 1; i <= p; i++) {
+            left[i]  = t - knots[s + 1 - i];
+            right[i] = knots[s + i] - t;
+            let saved = 0.0;
+            for (let j = 0; j < i; j++) {
+                const denom = right[j + 1] + left[i - j];
+                const term = (Math.abs(denom) < 1e-12) ? 0.0 : N[j] / denom;
+                N[j] = saved + right[j + 1] * term;
+                saved = left[i - j] * term;
+            }
+            N[i] = saved;
+        }
+        const out = new Array(p + 1);
+        for (let k = 0; k <= p; k++) out[k] = N[k];
+        return out;
+    }
+
     // ---- v1.1 audit-data overlay renderers --------------------------------
 
     // Per-profile / per-guide deviation heatmap: color a small sphere
@@ -892,6 +1030,13 @@ export class Viewer3D {
 
     setVSamplesVisibility(visible) {
         if (this.vSamplesPoints) this.vSamplesPoints.visible = visible;
+    }
+
+    setVSectionsVisibility(visible) {
+        if (!Array.isArray(this.vSectionLines)) return;
+        for (const ln of this.vSectionLines) {
+            if (ln) ln.visible = visible;
+        }
     }
 
     setSurfaceVisibility(label, visible) {

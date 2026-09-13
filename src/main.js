@@ -112,6 +112,7 @@ class App {
                 },
                 onIntermediateToggle: (label, visible) => {
                     if (label === 'v_samples') this.viewer.setVSamplesVisibility(visible);
+                    else if (label === 'v_sections') this.viewer.setVSectionsVisibility(visible);
                 },
                 ...baseCallbacks,
             });
@@ -366,13 +367,15 @@ class App {
             this.ui.updateAuditPanel(auditLayers, audit, (layerKey, visible) => {
                 this.viewer.setAuditLayer(layerKey, visible);
             });
-            // Intermediate Geometry (v-samples): only wire when the case
-            // actually carries v_samples data. When absent the folder's
-            // checkbox stays inert (no-op toggle).
+            // Intermediate Geometry (v-samples / v-sections): only wire
+            // when the case actually carries the corresponding data.
+            // When absent the folder's checkbox stays inert (no-op toggle).
             const vSamplesData = Array.isArray(nurbs?.vSamples) ? nurbs.vSamples : [];
-            if (vSamplesData.length > 0) {
+            const vSectionsData = Array.isArray(nurbs?.vSections) ? nurbs.vSections : [];
+            if (vSamplesData.length > 0 || vSectionsData.length > 0) {
                 this.ui.updateIntermediateGeometry((label, visible) => {
                     if (label === 'v_samples') this.viewer.setVSamplesVisibility(visible);
+                    else if (label === 'v_sections') this.viewer.setVSectionsVisibility(visible);
                 });
             }
         }

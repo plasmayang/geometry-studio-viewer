@@ -105,6 +105,10 @@ export class GeometryParser {
         // (see parseVSamples for the contract). Always present (possibly
         // empty) so consumers can rely on the key.
         const vSamples = this.parseVSamples(jsonData);
+        // v1.2: include v-section profile NURBS curves
+        // (see parseVSections for the contract). Always present (possibly
+        // empty) so consumers can rely on the key.
+        const vSections = this.parseVSections(jsonData);
         if (jsonData.surfaces || jsonData.surface || jsonData.curves || jsonData.support_surfaces || jsonData.constraint_visualizations) {
             const surfaces = [];
             // iter-review-25 §3.3.1: prefer the plural 'surfaces' array
@@ -145,12 +149,13 @@ export class GeometryParser {
                 surfaces: surfaces,
                 curves: jsonData.curves || [],
                 vSamples: vSamples,
+                vSections: vSections,
             };
         }
         if (!jsonData.geometry || !jsonData.geometry.nurbs) {
-            return { surfaces: [], curves: [], vSamples: vSamples };
+            return { surfaces: [], curves: [], vSamples: vSamples, vSections: vSections };
         }
-        return { ...jsonData.geometry.nurbs, vSamples: vSamples };
+        return { ...jsonData.geometry.nurbs, vSamples: vSamples, vSections: vSections };
     }
 
     /**
@@ -171,6 +176,43 @@ export class GeometryParser {
             const x = raw.position[0], y = raw.position[1], z = raw.position[2];
             if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
             out.push({ x, y, z });
+        }
+        return out;
+    }
+
+    /**
+     * Parse `intermediate_products.v_sections[]` into an array of NURBS
+     * curve descriptors (one per v-station). Each descriptor carries
+     * `{v, v_index, p_u, knots_u, control_points, dim, is_rational,
+     * u_min, u_max, is_periodic_u}`; Viewer3D re-evaluates the curve at
+     * fine u-resolution to draw it as a polyline. Records missing the
+     * required NURBS fields (knots_u, control_points, p_u) are silently
+     * dropped. Returns [] when `intermediate_products` or `v_sections`
+     * is absent.
+     */
+    static parseVSections(jsonData) {
+        const list = jsonData?.intermediate_products?.v_sections;
+        if (!Array.isArray(list) || list.length === 0) return [];
+        const out = [];
+        for (const raw of list) {
+            if (!raw || typeof raw !== 'object') continue;
+            const p_u = (typeof raw.p_u === 'number') ? raw.p_u : null;
+            const knots_u = Array.isArray(raw.knots_u) ? raw.knots_u : null;
+            const control_points = Array.isArray(raw.control_points) ? raw.control_points : null;
+            if (p_u === null || knots_u === null || control_points === null) continue;
+            if (knots_u.length === 0 || control_points.length === 0) continue;
+            out.push({
+                v: (typeof raw.v === 'number') ? raw.v : 0,
+                v_index: (typeof raw.v_index === 'number') ? raw.v_index : -1,
+                p_u,
+                knots_u,
+                control_points,
+                dim: (typeof raw.dim === 'number') ? raw.dim : 3,
+                is_rational: !!raw.is_rational,
+                u_min: (typeof raw.u_min === 'number') ? raw.u_min : knots_u[p_u],
+                u_max: (typeof raw.u_max === 'number') ? raw.u_max : knots_u[knots_u.length - p_u - 1],
+                is_periodic_u: !!raw.is_periodic_u,
+            });
         }
         return out;
     }
