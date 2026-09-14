@@ -160,12 +160,20 @@ export class GeometryParser {
 
     /**
      * Parse `intermediate_products.v_samples[]` (e2e-gallery writer
-     * output) into a flat list of `{x, y, z}` point records. Each input
-     * entry carries `{guide_index, v_index, v_param, u_param,
-     * position: [x, y, z]}` — only `position` is needed by the Points
-     * renderer. Records with malformed/missing positions are silently
-     * dropped (defensive against producer edge cases). Returns [] when
-     * `intermediate_products` or `v_samples` is absent.
+     * output) into a flat list of point records. Each input entry
+     * carries `{guide_index, v_index, v_param, u_param,
+     * position: [x, y, z], nominal_position: [nx, ny, nz],
+     * is_nominal_position_valid: bool}` — `position` is the anchor
+     * G_k = guide ∩ plane, `nominal_position` is Q_k = nominal manifold
+     * point; the displacement vector Q_k → G_k is rendered only when
+     * `is_nominal_position_valid === true`.
+     *
+     * Records with malformed/missing positions are silently dropped
+     * (defensive against producer edge cases). Records whose
+     * `nominal_position` is not a 3-array, or contains NaN/Infinity, are
+     * still kept but flagged with `hasNominal: false` so the renderer
+     * can skip them. Returns [] when `intermediate_products` or
+     * `v_samples` is absent.
      */
     static parseVSamples(jsonData) {
         const list = jsonData?.intermediate_products?.v_samples;
@@ -175,7 +183,23 @@ export class GeometryParser {
             if (!raw || !Array.isArray(raw.position) || raw.position.length < 3) continue;
             const x = raw.position[0], y = raw.position[1], z = raw.position[2];
             if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
-            out.push({ x, y, z });
+
+            // nominal_position may be absent on older envelopes; treat
+            // undefined/missing as "no nominal" so renderer skips it.
+            let hasNominal = false;
+            let nx = 0, ny = 0, nz = 0;
+            if (Array.isArray(raw.nominal_position) && raw.nominal_position.length >= 3
+                && raw.is_nominal_position_valid === true) {
+                const cx = raw.nominal_position[0];
+                const cy = raw.nominal_position[1];
+                const cz = raw.nominal_position[2];
+                if (Number.isFinite(cx) && Number.isFinite(cy) && Number.isFinite(cz)) {
+                    nx = cx; ny = cy; nz = cz;
+                    hasNominal = true;
+                }
+            }
+
+            out.push({ x, y, z, nx, ny, nz, hasNominal });
         }
         return out;
     }

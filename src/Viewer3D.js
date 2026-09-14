@@ -20,6 +20,7 @@ export class Viewer3D {
         this.surfaceGroups = {};
         this.auditLayers = {};
         this.vSamplesPoints = null;
+        this.displacementVectors = [];
         this.vSectionLines = [];
 
         this.scene.add(this.markersGroup);
@@ -104,6 +105,10 @@ export class Viewer3D {
         // vSamplesPoints (added to nurbsGroup) is disposed by the loop
         // above; null the reference so callers don't touch the disposed object.
         this.vSamplesPoints = null;
+        // displacementVectors (children of nurbsGroup) follow the same
+        // disposal path; clear the cache so callers don't toggle
+        // disposed objects.
+        this.displacementVectors = [];
         // vSectionLines (children of nurbsGroup) follow the same disposal
         // path; clear the cache so callers don't toggle disposed objects.
         this.vSectionLines = [];
@@ -124,6 +129,7 @@ export class Viewer3D {
         }
         if (nurbs && Array.isArray(nurbs.vSamples) && nurbs.vSamples.length > 0) {
             this.addVSamplesPoints(nurbs.vSamples);
+            this.addDisplacementVectors(nurbs.vSamples);
         }
         if (nurbs && Array.isArray(nurbs.vSections) && nurbs.vSections.length > 0) {
             this.addVSectionsCurves(nurbs.vSections);
@@ -189,6 +195,13 @@ export class Viewer3D {
         if (this.vSamplesPoints && this.vSamplesPoints.geometry
             && this.vSamplesPoints.geometry.attributes.position) {
             bbox.expandByObject(this.vSamplesPoints);
+        }
+        if (Array.isArray(this.displacementVectors) && this.displacementVectors.length > 0) {
+            for (const ln of this.displacementVectors) {
+                if (ln && ln.geometry && ln.geometry.attributes.position) {
+                    bbox.expandByObject(ln);
+                }
+            }
         }
         if (Array.isArray(this.vSectionLines) && this.vSectionLines.length > 0) {
             for (const ln of this.vSectionLines) {
@@ -638,6 +651,39 @@ export class Viewer3D {
     }
 
     /**
+     * Build one THREE.Line per v-sample that carries a valid
+     * `nominal_position` (i.e. `hasNominal === true`). Each line goes
+     * from the nominal manifold point Q_k = (nx, ny, nz) to the
+     * anchor G_k = (x, y, z); together they visualize how far the
+     * cross-section intersection drifted away from the ideal
+     * free-form path. Color: lime green 0x00ff00 for high contrast
+     * with the magenta v_samples (0xff00ff). Hidden by default;
+     * toggled via setDisplacementVectorsVisibility. Records with
+     * NaN/Infinity in any of the 6 coords are silently skipped
+     * (defensive against malformed envelope entries).
+     */
+    addDisplacementVectors(samples) {
+        if (!Array.isArray(samples) || samples.length === 0) return;
+        const mat = new THREE.LineBasicMaterial({ color: 0x00ff00 });
+        for (const s of samples) {
+            if (!s || s.hasNominal !== true) continue;
+            if (!Number.isFinite(s.x) || !Number.isFinite(s.y) || !Number.isFinite(s.z)) continue;
+            if (!Number.isFinite(s.nx) || !Number.isFinite(s.ny) || !Number.isFinite(s.nz)) continue;
+            const geom = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(s.nx, s.ny, s.nz),
+                new THREE.Vector3(s.x, s.y, s.z),
+            ]);
+            const line = new THREE.Line(geom, mat);
+            line.name = 'displacement_vector';
+            line.userData.label = 'displacement_vector';
+            line.userData.kind = 'displacement_vector';
+            line.visible = false;
+            this.displacementVectors.push(line);
+            this.nurbsGroup.add(line);
+        }
+    }
+
+    /**
      * Cox-de-Boor evaluation of a (possibly rational) B-spline curve at
      * parameter `t`. Returns a 3-component array [x, y, z]. Algorithm:
      *   1. Find span s.t. knots[s] <= t < knots[s+1]; clamp to last
@@ -1030,6 +1076,13 @@ export class Viewer3D {
 
     setVSamplesVisibility(visible) {
         if (this.vSamplesPoints) this.vSamplesPoints.visible = visible;
+    }
+
+    setDisplacementVectorsVisibility(visible) {
+        if (!Array.isArray(this.displacementVectors)) return;
+        for (const ln of this.displacementVectors) {
+            if (ln) ln.visible = visible;
+        }
     }
 
     setVSectionsVisibility(visible) {

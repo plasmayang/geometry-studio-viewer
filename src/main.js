@@ -113,6 +113,7 @@ class App {
                 onIntermediateToggle: (label, visible) => {
                     if (label === 'v_samples') this.viewer.setVSamplesVisibility(visible);
                     else if (label === 'v_sections') this.viewer.setVSectionsVisibility(visible);
+                    else if (label === 'displacement_vectors') this.viewer.setDisplacementVectorsVisibility(visible);
                 },
                 ...baseCallbacks,
             });
@@ -376,6 +377,7 @@ class App {
                 this.ui.updateIntermediateGeometry((label, visible) => {
                     if (label === 'v_samples') this.viewer.setVSamplesVisibility(visible);
                     else if (label === 'v_sections') this.viewer.setVSectionsVisibility(visible);
+                    else if (label === 'displacement_vectors') this.viewer.setDisplacementVectorsVisibility(visible);
                 });
             }
         }
