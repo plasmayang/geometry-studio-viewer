@@ -1,5 +1,37 @@
 import * as THREE from 'three';
 
+function flattenControlPoints(cps) {
+    if (!Array.isArray(cps) || cps.length === 0) return cps;
+    if (typeof cps[0] === 'object' && cps[0] !== null && !Array.isArray(cps[0])) {
+        const flat = [];
+        cps.forEach(cp => {
+            const w = (cp && typeof cp.w === 'number') ? cp.w : 1;
+            flat.push(cp.x, cp.y, cp.z, w);
+        });
+        return flat;
+    }
+    return cps;
+}
+
+function decorateCurves(curves) {
+    if (!Array.isArray(curves)) return curves;
+    return curves.map(c => {
+        if (!c || typeof c !== 'object') return c;
+        const src = c.control_points;
+        const flat = flattenControlPoints(src);
+        const dictFormat = Array.isArray(src) && src.length > 0
+            && typeof src[0] === 'object' && src[0] !== null;
+        const dimKnown = (typeof c.dim === 'number') ? c.dim : null;
+        const isRational = dimKnown === 4
+            || (dictFormat)
+            || (typeof c.is_rational === 'boolean' && c.is_rational);
+        const out = { ...c };
+        if (Array.isArray(flat)) out.controlPoints = flat;
+        out.dim = isRational ? 4 : 3;
+        return out;
+    });
+}
+
 export class GeometryParser {
     /**
      * Parses the mesh data from the kernel JSON.
@@ -38,15 +70,17 @@ export class GeometryParser {
             }
         }
 
+        const nurbs = this.parseNurbs(jsonData);
         return {
             geometry,
             markers,
-            nurbs: this.parseNurbs(jsonData),
+            nurbs: nurbs,
             audit: this.parseAudit(jsonData),
-            // spec 0002 (v1.2): null when absent so v1.1 envelopes
-            // bypass the aux-viz pass and skip the toggle injection.
             movingFrame: this.parseMovingFrame(jsonData),
             samplingPlane: this.parseSamplingPlane(jsonData),
+            // Mirrors `nurbs.proxiedGuides` so direct consumers (tests,
+            // ad-hoc UIs) do not have to dig through `nurbs.*`.
+            proxiedGuides: Array.isArray(nurbs?.proxiedGuides) ? nurbs.proxiedGuides : [],
         };
     }
 
@@ -109,6 +143,11 @@ export class GeometryParser {
         // (see parseVSections for the contract). Always present (possibly
         // empty) so consumers can rely on the key.
         const vSections = this.parseVSections(jsonData);
+        // proxied_guides (e2e-gallery PsiBasisFit debug): same shape as
+        // a curve entry but with type "proxied_guide" and only knots_v
+        // populated. Always present (possibly empty) so consumers can
+        // rely on the key.
+        const proxiedGuides = this.parseProxiedGuides(jsonData);
         if (jsonData.surfaces || jsonData.surface || jsonData.curves || jsonData.support_surfaces || jsonData.constraint_visualizations) {
             const surfaces = [];
             // iter-review-25 §3.3.1: prefer the plural 'surfaces' array
@@ -142,20 +181,34 @@ export class GeometryParser {
                     p_v: s.p_v,
                     knots_u: s.knots_u,
                     knots_v: s.knots_v,
-                    control_points: s.control_points,
+                    control_points: flattenControlPoints(s.control_points),
                 });
             }
             return {
                 surfaces: surfaces,
-                curves: jsonData.curves || [],
+                curves: decorateCurves(jsonData.curves || []),
                 vSamples: vSamples,
                 vSections: vSections,
+                proxiedGuides: proxiedGuides,
             };
         }
         if (!jsonData.geometry || !jsonData.geometry.nurbs) {
-            return { surfaces: [], curves: [], vSamples: vSamples, vSections: vSections };
+            return {
+                surfaces: [],
+                curves: [],
+                vSamples: vSamples,
+                vSections: vSections,
+                proxiedGuides: proxiedGuides,
+            };
         }
-        return { ...jsonData.geometry.nurbs, vSamples: vSamples, vSections: vSections };
+        const legacy = jsonData.geometry.nurbs;
+        return {
+            ...legacy,
+            vSamples: vSamples,
+            vSections: vSections,
+            proxiedGuides: proxiedGuides,
+            curves: decorateCurves(legacy.curves || []),
+        };
     }
 
     /**
@@ -222,7 +275,7 @@ export class GeometryParser {
             if (!raw || typeof raw !== 'object') continue;
             const p_u = (typeof raw.p_u === 'number') ? raw.p_u : null;
             const knots_u = Array.isArray(raw.knots_u) ? raw.knots_u : null;
-            const control_points = Array.isArray(raw.control_points) ? raw.control_points : null;
+            const control_points = Array.isArray(raw.control_points) ? flattenControlPoints(raw.control_points) : null;
             if (p_u === null || knots_u === null || control_points === null) continue;
             if (knots_u.length === 0 || control_points.length === 0) continue;
             out.push({
@@ -236,6 +289,48 @@ export class GeometryParser {
                 u_min: (typeof raw.u_min === 'number') ? raw.u_min : knots_u[p_u],
                 u_max: (typeof raw.u_max === 'number') ? raw.u_max : knots_u[knots_u.length - p_u - 1],
                 is_periodic_u: !!raw.is_periodic_u,
+            });
+        }
+        return out;
+    }
+
+    /**
+     * Parse `intermediate_products.proxied_guides[]` (e2e-gallery
+     * PsiBasisFit loft-mode debug) into an array of NURBS curve
+     * descriptors. Each entry mirrors a curve shape with
+     * `type === "proxied_guide"`; only knots_v is populated
+     * (knots_u empty), so the curve is evaluated along the v
+     * direction (knots_v + p_v). Viewer3D re-evaluates each
+     * descriptor at fine v-resolution to draw it as a polyline.
+     * Records missing the required NURBS fields (knots_v /
+     * control_points / p_v) are silently dropped. Returns []
+     * when `intermediate_products` or `proxied_guides` is absent.
+     */
+    static parseProxiedGuides(jsonData) {
+        const list = jsonData?.intermediate_products?.proxied_guides;
+        if (!Array.isArray(list) || list.length === 0) return [];
+        const out = [];
+        for (const raw of list) {
+            if (!raw || typeof raw !== 'object') continue;
+            const p_v = (typeof raw.p_v === 'number') ? raw.p_v : null;
+            const knots_v = Array.isArray(raw.knots_v) ? raw.knots_v : null;
+            const control_points = Array.isArray(raw.control_points)
+                ? flattenControlPoints(raw.control_points)
+                : null;
+            if (p_v === null || knots_v === null || control_points === null) continue;
+            if (knots_v.length === 0 || control_points.length === 0) continue;
+            const dim = (typeof raw.dim === 'number') ? raw.dim : 3;
+            out.push({
+                label: (typeof raw.label === 'string') ? raw.label : '',
+                p_v,
+                knots_v,
+                control_points,
+                controlPoints: control_points,
+                dim: dim,
+                is_rational: !!raw.is_rational,
+                v_min: (typeof raw.v_min === 'number') ? raw.v_min : knots_v[p_v],
+                v_max: (typeof raw.v_max === 'number') ? raw.v_max : knots_v[knots_v.length - p_v - 1],
+                is_periodic_v: !!raw.is_periodic_v,
             });
         }
         return out;

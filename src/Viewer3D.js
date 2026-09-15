@@ -22,6 +22,7 @@ export class Viewer3D {
         this.vSamplesPoints = null;
         this.displacementVectors = [];
         this.vSectionLines = [];
+        this.proxiedGuideLines = [];
 
         this.scene.add(this.markersGroup);
         this.scene.add(this.nurbsGroup);
@@ -112,6 +113,10 @@ export class Viewer3D {
         // vSectionLines (children of nurbsGroup) follow the same disposal
         // path; clear the cache so callers don't toggle disposed objects.
         this.vSectionLines = [];
+        // proxiedGuideLines (children of nurbsGroup) follow the same
+        // disposal path; clear the cache so callers don't toggle
+        // disposed objects.
+        this.proxiedGuideLines = [];
 
         this.surfaceGroups = {};
         this.auditLayers = {};
@@ -133,6 +138,9 @@ export class Viewer3D {
         }
         if (nurbs && Array.isArray(nurbs.vSections) && nurbs.vSections.length > 0) {
             this.addVSectionsCurves(nurbs.vSections);
+        }
+        if (nurbs && Array.isArray(nurbs.proxiedGuides) && nurbs.proxiedGuides.length > 0) {
+            this.addProxiedGuidesCurves(nurbs.proxiedGuides);
         }
 
         // v1.1 audit data — only the heatmap layer survives here; the
@@ -210,6 +218,19 @@ export class Viewer3D {
                 }
             }
         }
+        if (Array.isArray(this.proxiedGuideLines) && this.proxiedGuideLines.length > 0) {
+            for (const ln of this.proxiedGuideLines) {
+                if (ln && ln.geometry && ln.geometry.attributes.position) {
+                    bbox.expandByObject(ln);
+                }
+            }
+        }
+        // Sections / guides / spine polylines live under nurbsGroup;
+        // without this, the bbox is dominated by the surface CPs and
+        // the offset can push every profile away from the world grids.
+        if (this.nurbsGroup && this.nurbsGroup.children.length > 0) {
+            bbox.expandByObject(this.nurbsGroup);
+        }
 
         // spec 0002: fold station origins into the bbox so open envelopes
         // (spine outside the mesh) still get a sane per-axis scale.
@@ -231,6 +252,11 @@ export class Viewer3D {
             this.markersGroup.position.copy(offset);
             this.nurbsGroup.position.copy(offset);
             this.auditGroup.position.copy(offset);
+            // Move the world grids + axes by the same offset so the
+            // XY / XZ planes remain visually anchored to the data.
+            this.grid && this.grid.position.copy(offset);
+            this.gridXZ && this.gridXZ.position.copy(offset);
+            this.axesHelper && this.axesHelper.position.copy(offset);
             const size = bbox.getSize(new THREE.Vector3()).length();
             bboxDiagonal = size;
             this.camera.position.set(size, size, size);
@@ -287,7 +313,7 @@ export class Viewer3D {
                     let isFlatObj = false;
                     if (rawCPs && rawCPs.length > 0 && typeof rawCPs[0] === 'object') {
                         const flat = [];
-                        rawCPs.forEach(pt => flat.push(pt.x, pt.y, pt.z));
+                        rawCPs.forEach(pt => flat.push(pt.x, pt.y, pt.z, (typeof pt.w === 'number') ? pt.w : 1));
                         rawCPs = flat;
                         isFlatObj = true;
                     }
@@ -298,14 +324,17 @@ export class Viewer3D {
                         curveKnots = Array.from(data.knots);
                         numPts = curveKnots.length - p - 1;
                     } else {
-                        numPts = isFlatObj ? (rawCPs.length / 3) : Math.floor(rawCPs.length / 3);
+                        numPts = isFlatObj ? (rawCPs.length / 4) : Math.floor(rawCPs.length / 4);
                         curveKnots = [];
                         for (let k = 0; k <= p; k++) curveKnots.push(0);
                         for (let k = 1; k < numPts - p; k++) curveKnots.push(k);
                         for (let k = 0; k <= p; k++) curveKnots.push(Math.max(1, numPts - p));
                     }
 
-                    const realStride = isFlatObj ? 3 : (rawCPs.length % 3 === 0 ? 3 : 4);
+                    const dataDim = (typeof data.dim === 'number') ? data.dim : null;
+                    const realStride = isFlatObj
+                        ? 4
+                        : ((dataDim === 3 && rawCPs.length % 3 === 0) ? 3 : 4);
                     const numCPsProvided = Math.floor(rawCPs.length / realStride);
                     const cps = [];
                     for (let i = 0; i < numPts; i++) {
@@ -374,7 +403,7 @@ export class Viewer3D {
                     let isFlatObj = false;
                     if (rawCPs && rawCPs.length > 0 && typeof rawCPs[0] === 'object') {
                         const flat = [];
-                        rawCPs.forEach(pt => flat.push(pt.x, pt.y, pt.z));
+                        rawCPs.forEach(pt => flat.push(pt.x, pt.y, pt.z, (typeof pt.w === 'number') ? pt.w : 1));
                         rawCPs = flat;
                         isFlatObj = true;
                     }
@@ -401,7 +430,9 @@ export class Viewer3D {
 
                     const expectedTotal = (data.n_u !== undefined ? data.n_u + 1 : numU) *
                                           (data.n_v !== undefined ? data.n_v + 1 : numV);
-                    const stride = isFlatObj ? 3 : Math.max(1, Math.round(rawCPs.length / expectedTotal));
+                    const stride = isFlatObj
+                        ? 4
+                        : Math.max(1, Math.round(rawCPs.length / expectedTotal));
                     const realNumU = data.n_u !== undefined ? data.n_u + 1 : numU;
                     const realNumV = data.n_v !== undefined ? data.n_v + 1 : numV;
 
@@ -618,7 +649,10 @@ export class Viewer3D {
             if (!c || typeof c !== 'object') continue;
             const p = (typeof c.p_u === 'number') ? c.p_u : null;
             const knots = Array.isArray(c.knots_u) ? c.knots_u : null;
-            const cps = Array.isArray(c.control_points) ? c.control_points : null;
+            let cps = Array.isArray(c.control_points) ? c.control_points : null;
+            if (cps && cps.length > 0 && typeof cps[0] === 'object' && cps[0] !== null && !Array.isArray(cps[0])) {
+                cps = cps.map(cp => [cp.x, cp.y, cp.z, cp.w !== undefined ? cp.w : 1]);
+            }
             const dim = (typeof c.dim === 'number') ? c.dim : 3;
             if (p === null || knots === null || cps === null) continue;
             if (knots.length < p + 2 || cps.length === 0) continue;
@@ -646,6 +680,70 @@ export class Viewer3D {
             line.userData.kind = 'v_section';
             line.visible = false;
             this.vSectionLines.push(line);
+            this.nurbsGroup.add(line);
+        }
+    }
+
+    /**
+     * Build THREE.Line objects (one per entry) from NURBS curve
+     * descriptors stored in `intermediate_products.proxied_guides[]`.
+     * Each curve is resampled at 64 points along [v_min, v_max] using
+     * Cox-de-Boor B-spline basis evaluation; rational curves (dim=4)
+     * divide by the homogeneous weight sum. The curve is evaluated
+     * along v (knots_v + p_v) since the proxy replaces an original
+     * guide curve. Color: red 0xff2222 with a dashed material so the
+     * proxy visually contrasts with the magenta original guide
+     * (0xff00ff) and the green spine default (0x008800). Hidden by
+     * default; toggled via setProxiedGuidesVisibility. Malformed
+     * descriptors (missing knots_v / control_points / p_v, or empty
+     * CPs) are silently skipped. Control points accept both the flat
+     * `[x,y,z,w,...]` form (with optional stride=3 or 4) and the
+     * object form `[{x,y,z,w}, ...]`, mirroring addNurbs curve
+     * handling.
+     */
+    addProxiedGuidesCurves(curves) {
+        if (!Array.isArray(curves) || curves.length === 0) return;
+        const SAMPLES = 64;
+        const mat = new THREE.LineBasicMaterial({ color: 0xff2222, linewidth: 2 });
+        for (const c of curves) {
+            if (!c || typeof c !== 'object') continue;
+            const p = (typeof c.p_v === 'number') ? c.p_v : null;
+            const knots = Array.isArray(c.knots_v) ? c.knots_v : null;
+            let rawCPs = Array.isArray(c.control_points) ? c.control_points : null;
+            let isFlatObj = false;
+            if (rawCPs && rawCPs.length > 0 && typeof rawCPs[0] === 'object') {
+                const flat = [];
+                rawCPs.forEach(pt => flat.push(pt.x, pt.y, pt.z, (typeof pt.w === 'number') ? pt.w : 1.0));
+                rawCPs = flat;
+                isFlatObj = true;
+            }
+            if (p === null || knots === null || rawCPs === null) continue;
+            if (knots.length < p + 2 || rawCPs.length === 0) continue;
+            const dim = (typeof c.dim === 'number') ? c.dim : 3;
+            const rational = (dim === 4);
+            const stride = isFlatObj ? 4 : (rational ? 4 : 3);
+            const numCPs = Math.floor(rawCPs.length / stride);
+            if (numCPs < p + 1) continue;
+            const vMin = (typeof c.v_min === 'number') ? c.v_min : knots[p];
+            const vMax = (typeof c.v_max === 'number') ? c.v_max : knots[knots.length - p - 1];
+            if (!(vMax > vMin)) continue;
+            const positions = new Float32Array(SAMPLES * 3);
+            for (let s = 0; s < SAMPLES; s++) {
+                const t = vMin + (vMax - vMin) * (s / (SAMPLES - 1));
+                const pt = this._evalBSplineCurve(t, p, knots, rawCPs, numCPs, stride, rational);
+                positions[s * 3]     = pt[0];
+                positions[s * 3 + 1] = pt[1];
+                positions[s * 3 + 2] = pt[2];
+            }
+            const geom = new THREE.BufferGeometry();
+            geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            const line = new THREE.Line(geom, mat);
+            const idxLabel = c.label || `${this.proxiedGuideLines.length}`;
+            line.name = `proxied_guide_${idxLabel}`;
+            line.userData.label = `proxied_guide: ${c.label || idxLabel}`;
+            line.userData.kind = 'proxied_guide';
+            line.visible = false;
+            this.proxiedGuideLines.push(line);
             this.nurbsGroup.add(line);
         }
     }
@@ -1092,6 +1190,13 @@ export class Viewer3D {
         }
     }
 
+    setProxiedGuidesVisibility(visible) {
+        if (!Array.isArray(this.proxiedGuideLines)) return;
+        for (const ln of this.proxiedGuideLines) {
+            if (ln) ln.visible = visible;
+        }
+    }
+
     setSurfaceVisibility(label, visible) {
         if (this.surfaceGroups[label]) this.surfaceGroups[label].visible = visible;
     }
@@ -1111,14 +1216,14 @@ export class Viewer3D {
         if (!data) return null;
         try {
             const p = (data.degree !== undefined) ? data.degree : data.p;
-            let rawCPs = data.controlPoints || data.control_points;
-            let isFlatObj = false;
-            if (rawCPs && rawCPs.length > 0 && typeof rawCPs[0] === 'object') {
-                const flat = [];
-                rawCPs.forEach(pt => flat.push(pt.x, pt.y, pt.z));
-                rawCPs = flat;
-                isFlatObj = true;
-            }
+                    let rawCPs = data.controlPoints || data.control_points;
+                    let isFlatObj = false;
+                    if (rawCPs && rawCPs.length > 0 && typeof rawCPs[0] === 'object') {
+                        const flat = [];
+                        rawCPs.forEach(pt => flat.push(pt.x, pt.y, pt.z, pt.w !== undefined ? pt.w : 1));
+                        rawCPs = flat;
+                        isFlatObj = true;
+                    }
             if (!rawCPs || rawCPs.length === 0) return null;
 
             let curveKnots;
@@ -1127,13 +1232,16 @@ export class Viewer3D {
                 curveKnots = Array.from(data.knots);
                 numPts = curveKnots.length - p - 1;
             } else {
-                numPts = isFlatObj ? (rawCPs.length / 3) : Math.floor(rawCPs.length / 3);
+                numPts = isFlatObj ? (rawCPs.length / 4) : Math.floor(rawCPs.length / 4);
                 curveKnots = [];
                 for (let k = 0; k <= p; k++) curveKnots.push(0);
                 for (let k = 1; k < numPts - p; k++) curveKnots.push(k);
                 for (let k = 0; k <= p; k++) curveKnots.push(Math.max(1, numPts - p));
             }
-            const realStride = isFlatObj ? 3 : (rawCPs.length % 3 === 0 ? 3 : 4);
+            const dataDim = (typeof data.dim === 'number') ? data.dim : null;
+            const realStride = isFlatObj
+                ? 4
+                : ((dataDim === 3 && rawCPs.length % 3 === 0) ? 3 : 4);
             const numCPsProvided = Math.floor(rawCPs.length / realStride);
             const cps = [];
             for (let i = 0; i < numPts; i++) {

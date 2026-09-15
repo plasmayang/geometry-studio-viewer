@@ -113,6 +113,7 @@ class App {
                 onIntermediateToggle: (label, visible) => {
                     if (label === 'v_samples') this.viewer.setVSamplesVisibility(visible);
                     else if (label === 'v_sections') this.viewer.setVSectionsVisibility(visible);
+                    else if (label === 'proxied_guides') this.viewer.setProxiedGuidesVisibility(visible);
                     else if (label === 'displacement_vectors') this.viewer.setDisplacementVectorsVisibility(visible);
                 },
                 ...baseCallbacks,
@@ -368,15 +369,18 @@ class App {
             this.ui.updateAuditPanel(auditLayers, audit, (layerKey, visible) => {
                 this.viewer.setAuditLayer(layerKey, visible);
             });
-            // Intermediate Geometry (v-samples / v-sections): only wire
-            // when the case actually carries the corresponding data.
-            // When absent the folder's checkbox stays inert (no-op toggle).
+            // Intermediate Geometry (v-samples / v-sections / proxied-guides):
+            // only wire when the case actually carries the corresponding
+            // data. When absent the folder's checkbox stays inert (no-op
+            // toggle).
             const vSamplesData = Array.isArray(nurbs?.vSamples) ? nurbs.vSamples : [];
             const vSectionsData = Array.isArray(nurbs?.vSections) ? nurbs.vSections : [];
-            if (vSamplesData.length > 0 || vSectionsData.length > 0) {
+            const proxiedGuidesData = Array.isArray(nurbs?.proxiedGuides) ? nurbs.proxiedGuides : [];
+            if (vSamplesData.length > 0 || vSectionsData.length > 0 || proxiedGuidesData.length > 0) {
                 this.ui.updateIntermediateGeometry((label, visible) => {
                     if (label === 'v_samples') this.viewer.setVSamplesVisibility(visible);
                     else if (label === 'v_sections') this.viewer.setVSectionsVisibility(visible);
+                    else if (label === 'proxied_guides') this.viewer.setProxiedGuidesVisibility(visible);
                     else if (label === 'displacement_vectors') this.viewer.setDisplacementVectorsVisibility(visible);
                 });
             }
@@ -638,3 +642,7 @@ class App {
 
 const app = new App();
 app.init();
+if (typeof window !== 'undefined') {
+    window.__viewerApp = app;
+    import('three').then(m => { window.__THREE_FOR_DEBUG__ = m; });
+}
