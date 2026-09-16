@@ -4,6 +4,9 @@ import { VertexNormalsHelper } from 'three/addons/helpers/VertexNormalsHelper.js
 import { NURBSCurve } from 'three/addons/curves/NURBSCurve.js';
 import { NURBSSurface } from 'three/addons/curves/NURBSSurface.js';
 import { ParametricGeometry } from 'three/addons/geometries/ParametricGeometry.js';
+import { Line2 } from 'three/addons/lines/Line2.js';
+import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 
 export class Viewer3D {
     constructor() {
@@ -17,6 +20,15 @@ export class Viewer3D {
         this.markersGroup = new THREE.Group();
         this.nurbsGroup = new THREE.Group();
         this.auditGroup = new THREE.Group();
+        // Stage-1 (Profile Coupling) debug overlays — all hidden by
+        // default; toggled via setCouplingDebug + setSeamMarkersVisibility
+        // / setTangentArrowsVisibility / setRulingLinesVisibility.
+        this.seamMarkersGroup = new THREE.Group();
+        this.tangentArrowsGroup = new THREE.Group();
+        this.rulingLinesGroup = new THREE.Group();
+        this.seamMarkersGroup.visible = false;
+        this.tangentArrowsGroup.visible = false;
+        this.rulingLinesGroup.visible = false;
         this.surfaceGroups = {};
         this.auditLayers = {};
         this.vSamplesPoints = null;
@@ -27,6 +39,9 @@ export class Viewer3D {
         this.scene.add(this.markersGroup);
         this.scene.add(this.nurbsGroup);
         this.scene.add(this.auditGroup);
+        this.scene.add(this.seamMarkersGroup);
+        this.scene.add(this.tangentArrowsGroup);
+        this.scene.add(this.rulingLinesGroup);
 
         this.material = new THREE.MeshPhongMaterial({
             color: 0x4488ff,
@@ -73,6 +88,18 @@ export class Viewer3D {
             this.camera.aspect = window.innerWidth / window.innerHeight;
             this.camera.updateProjectionMatrix();
             this.renderer.setSize(window.innerWidth, window.innerHeight);
+            // LineMaterial.resolution must track viewport or world-space line
+            // width breaks after a resize.
+            if (this.rulingLinesGroup) {
+                this.rulingLinesGroup.traverse((obj) => {
+                    if (obj.userData && obj.userData.material
+                        && obj.userData.material.resolution) {
+                        obj.userData.material.resolution.set(
+                            window.innerWidth, window.innerHeight,
+                        );
+                    }
+                });
+            }
         });
 
         this.animate();
@@ -91,7 +118,8 @@ export class Viewer3D {
             if (this.mesh.geometry) this.mesh.geometry.dispose();
         }
 
-        [this.markersGroup, this.nurbsGroup, this.auditGroup].forEach(group => {
+        [this.markersGroup, this.nurbsGroup, this.auditGroup,
+         this.seamMarkersGroup, this.tangentArrowsGroup, this.rulingLinesGroup].forEach(group => {
             while(group.children.length > 0) {
                 const child = group.children[0];
                 if (child.geometry) child.geometry.dispose();
@@ -1170,6 +1198,160 @@ export class Viewer3D {
         if (this.auditLayers[layerKey]) {
             this.auditLayers[layerKey].visible = visible;
         }
+    }
+
+    // ---- Stage-1 (Profile Coupling) debug overlay API --------------------
+
+    /**
+     * Build the Stage-1 visualization (seam markers + tangent arrows +
+     * ruling lines) from a parsed `case.debug.stage1_coupling` envelope.
+     * The three Three.js Groups are populated; their visibility is
+     * driven by the separate setters below. Defensive against missing
+     * input (legacy envelopes): toggles the groups invisible and
+     * console-logs a one-liner.
+     */
+    setCouplingDebug(coupling) {
+        if (!coupling || typeof coupling !== 'object') {
+            console.info('Viewer3D: no stage1_coupling debug data — overlays hidden.');
+            if (this.seamMarkersGroup) this.seamMarkersGroup.visible = false;
+            if (this.tangentArrowsGroup) this.tangentArrowsGroup.visible = false;
+            if (this.rulingLinesGroup) this.rulingLinesGroup.visible = false;
+            return;
+        }
+        const seams = Array.isArray(coupling.seams) ? coupling.seams : [];
+        const rulingLines = Array.isArray(coupling.ruling_lines) ? coupling.ruling_lines : [];
+
+        // Seam markers: one sphere + label sprite per seam.
+        for (const seam of seams) {
+            if (!seam || !Array.isArray(seam.start_point) || seam.start_point.length < 3) continue;
+            const [x, y, z] = seam.start_point;
+            const colorHex = this._hexFromColorString(seam.color, 0xff8844);
+            const sphereGeom = new THREE.SphereGeometry(0.05, 16, 16);
+            const sphereMat = new THREE.MeshBasicMaterial({ color: colorHex });
+            const sphere = new THREE.Mesh(sphereGeom, sphereMat);
+            sphere.position.set(x, y, z);
+            sphere.userData.label = seam.label
+                || `seam_p${seam.profile_index ?? '?'}`;
+            sphere.userData.kind = 'seam_marker';
+            this.seamMarkersGroup.add(sphere);
+
+            // Optional label sprite — only if a label is provided
+            // (avoids the cost of generating canvas textures for every
+            // unnamed seam).
+            if (seam.label) {
+                try {
+                    const sprite = this._makeAnnoSprite(seam.label, colorHex, 0.5);
+                    sprite.position.set(x, y + 0.08, z);
+                    sprite.userData.label = seam.label;
+                    this.seamMarkersGroup.add(sprite);
+                } catch (e) { /* label sprites are best-effort */ }
+            }
+        }
+
+        // Tangent arrows: one ArrowHelper per seam.
+        for (const seam of seams) {
+            if (!seam) continue;
+            if (!Array.isArray(seam.start_point) || seam.start_point.length < 3) continue;
+            if (!Array.isArray(seam.tangent_vector) || seam.tangent_vector.length < 3) continue;
+            const [x, y, z] = seam.start_point;
+            const [tx, ty, tz] = seam.tangent_vector;
+            const tangent = new THREE.Vector3(tx, ty, tz);
+            const len = tangent.length();
+            if (len < 1e-9) continue;
+            const dir = tangent.clone().multiplyScalar(1 / len);
+            const origin = new THREE.Vector3(x, y, z);
+            const colorHex = this._hexFromColorString(seam.color, 0xff8844);
+            const arrow = new THREE.ArrowHelper(dir, origin, 0.5, colorHex, 0.12, 0.08);
+            arrow.userData.label = seam.label || `tangent_p${seam.profile_index ?? '?'}`;
+            arrow.userData.kind = 'tangent_arrow';
+            this.tangentArrowsGroup.add(arrow);
+        }
+
+        // Ruling lines: thick Line2 (linewidth works in world space,
+        // unlike LineBasicMaterial) per ruling-line entry. Small endpoint
+        // spheres make the line-to-profile intersection visually obvious.
+        const screenSize = () => Math.max(1, Math.min(window.innerWidth, window.innerHeight));
+        const rulingWidthPx = Math.max(2, Math.min(4, screenSize() * 0.003));
+        for (const rl of rulingLines) {
+            if (!rl) continue;
+            if (!Array.isArray(rl.from) || rl.from.length < 3) continue;
+            if (!Array.isArray(rl.to) || rl.to.length < 3) continue;
+            const fromV = new THREE.Vector3(rl.from[0], rl.from[1], rl.from[2]);
+            const toV = new THREE.Vector3(rl.to[0], rl.to[1], rl.to[2]);
+            const colorHex = this._hexFromColorString(rl.color, 0xff6633);
+            const lineGeom = new LineGeometry();
+            lineGeom.setPositions([fromV.x, fromV.y, fromV.z, toV.x, toV.y, toV.z]);
+            const lineMat = new LineMaterial({
+                color: colorHex,
+                linewidth: rulingWidthPx,
+                transparent: true,
+                opacity: 0.9,
+                worldUnits: false,
+            });
+            lineMat.resolution.set(window.innerWidth, window.innerHeight);
+            const line = new Line2(lineGeom, lineMat);
+            line.computeLineDistances();
+            line.userData.label = 'ruling_line';
+            line.userData.kind = 'ruling_line';
+            line.userData.material = lineMat;
+            this.rulingLinesGroup.add(line);
+
+            const endSphereGeom = new THREE.SphereGeometry(0.025, 12, 12);
+            const endSphereMat = new THREE.MeshBasicMaterial({ color: colorHex });
+            this.rulingLinesGroup.add(new THREE.Mesh(endSphereGeom, endSphereMat).translateX(fromV.x).translateY(fromV.y).translateZ(fromV.z));
+            this.rulingLinesGroup.add(new THREE.Mesh(endSphereGeom, endSphereMat).translateX(toV.x).translateY(toV.y).translateZ(toV.z));
+        }
+
+        console.info(
+            `Viewer3D: stage1_coupling built (seams=${seams.length}, `
+            + `ruling_lines=${rulingLines.length}).`
+        );
+    }
+
+    /**
+     * Convert a CSS color string ('#ff8844' or 'rgb(...)') into a 24-bit
+     * integer hex (0xff8844). Falls back to the supplied default when
+     * parsing fails. Defensive against malformed color values in the
+     * case.debug envelope.
+     */
+    _hexFromColorString(colorStr, fallback) {
+        if (typeof colorStr !== 'string') return fallback;
+        const s = colorStr.trim();
+        if (s.startsWith('#') && (s.length === 7 || s.length === 4)) {
+            let hex = (s.length === 4)
+                ? '#' + s[1] + s[1] + s[2] + s[2] + s[3] + s[3]
+                : s;
+            const n = parseInt(hex.slice(1), 16);
+            if (!Number.isNaN(n)) return n;
+        }
+        // Try the browser's CSS color parser — works in Chromium under
+        // Vite dev. Cheap, no canvas needed for the value extraction.
+        if (typeof document !== 'undefined') {
+            try {
+                const probe = document.createElement('div');
+                probe.style.color = s;
+                document.body.appendChild(probe);
+                const rgb = getComputedStyle(probe).color;
+                document.body.removeChild(probe);
+                const m = rgb.match(/rgb\((\d+),\s*(\d+),\s*(\d+)/);
+                if (m) return (parseInt(m[1], 10) << 16)
+                              | (parseInt(m[2], 10) << 8)
+                              | parseInt(m[3], 10);
+            } catch (e) { /* fall through */ }
+        }
+        return fallback;
+    }
+
+    setSeamMarkersVisibility(visible) {
+        if (this.seamMarkersGroup) this.seamMarkersGroup.visible = visible;
+    }
+
+    setTangentArrowsVisibility(visible) {
+        if (this.tangentArrowsGroup) this.tangentArrowsGroup.visible = visible;
+    }
+
+    setRulingLinesVisibility(visible) {
+        if (this.rulingLinesGroup) this.rulingLinesGroup.visible = visible;
     }
 
     setVSamplesVisibility(visible) {

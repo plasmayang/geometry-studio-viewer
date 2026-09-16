@@ -97,9 +97,134 @@ export class UIController {
             }
         }
 
-        this.sectionModeFolder = this.pane.addFolder({
-            title: 'Output Surfaces',
-            expanded: true
+        // ----------------------------------------------------------------
+        // Pipeline stage folders (Stages 0-4). The previous flat layout
+        // (Output Surfaces / Intermediate Geometry / Input Geometries /
+        // Visuals) is reorganized into stage-keyed folders so a reviewer
+        // can walk the kernel pipeline top-down: raw inputs → coupling
+        // → basis → theoretical → output.
+        // ----------------------------------------------------------------
+
+        // Stage 0: Inputs. Profile / spine / guide visibility toggles are
+        // populated per-case (see updateCurveToggles). Global mesh
+        // display toggles (wireframe / control polygon / grid / color /
+        // normals) live here too — they're inputs to how the geometry
+        // is *presented*, regardless of which stage produced it.
+        this.stage0InputsFolder = this.pane.addFolder({
+            title: 'Stage 0: Inputs',
+            expanded: true,
+        });
+        this.surfaceFolder = this.stage0InputsFolder.addFolder({
+            title: 'Profiles & Guides',
+            expanded: true,
+        });
+        this.curveFolder = this.stage0InputsFolder.addFolder({
+            title: 'Curves',
+            expanded: false,
+        });
+        this.stage0VisualsFolder = this.stage0InputsFolder.addFolder({
+            title: 'Display',
+            expanded: false,
+        });
+        this.stage0VisualsFolder.addBinding(this.params, 'wireframe', { label: 'Wireframe' })
+            .on('change', (ev) => callbacks.onWireframeToggle(ev.value));
+        this.stage0VisualsFolder.addBinding(this.params, 'showControlPolygon', { label: 'Control Polygon' })
+            .on('change', (ev) => callbacks.onControlPolygonToggle(ev.value));
+        this.stage0VisualsFolder.addBinding(this.params, 'showNormals', { label: 'Show Normals' })
+            .on('change', (ev) => callbacks.onNormalsToggle(ev.value));
+        this.stage0VisualsFolder.addBinding(this.params, 'grid', { label: 'Show Grid' })
+            .on('change', (ev) => callbacks.onGridToggle(ev.value));
+        this.stage0VisualsFolder.addBinding(this.params, 'color', { label: 'Mesh Color' })
+            .on('change', (ev) => callbacks.onColorChange(ev.value));
+
+        // Stage 1: Profile Coupling. Three overlays driven by
+        // case.debug.stage1_coupling: seam markers, tangent arrows,
+        // ruling lines. Defaults OFF; main.js wires the toggles to the
+        // Viewer3D groups built in setCouplingDebug().
+        this.stage1Folder = this.pane.addFolder({
+            title: 'Stage 1: Profile Coupling',
+            expanded: false,
+        });
+        this.stage1Params = {
+            showSeamMarkers: false,
+            showTangentArrows: false,
+            showRulingLines: false,
+        };
+        this.stage1Folder.addBinding(this.stage1Params, 'showSeamMarkers', {
+            label: 'Seam Markers'
+        }).on('change', (ev) => {
+            const cb = callbacks.onStage1Toggle || (() => {});
+            cb('seam_markers', ev.value);
+        });
+        this.stage1Folder.addBinding(this.stage1Params, 'showTangentArrows', {
+            label: 'Tangent Arrows'
+        }).on('change', (ev) => {
+            const cb = callbacks.onStage1Toggle || (() => {});
+            cb('tangent_arrows', ev.value);
+        });
+        this.stage1Folder.addBinding(this.stage1Params, 'showRulingLines', {
+            label: 'Ruling Lines'
+        }).on('change', (ev) => {
+            const cb = callbacks.onStage1Toggle || (() => {});
+            cb('ruling_lines', ev.value);
+        });
+
+        // Stage 2: Universal Basis U. Global knot markers are a future
+        // feature — the toggle stays inert until setGlobalKnotsVisibility
+        // lands on Viewer3D. "Show Basis Timeline" is a cross-tab signal
+        // dispatched by main.js (it switches the workspace to Tab 2 when
+        // the user ticks this box).
+        this.stage2Folder = this.pane.addFolder({
+            title: 'Stage 2: Universal Basis U',
+            expanded: false,
+        });
+        this.stage2Params = {
+            showGlobalKnots: false,
+            showBasisTimelineSteps: false,
+        };
+        this.stage2Folder.addBinding(this.stage2Params, 'showGlobalKnots', {
+            label: 'Global Knots (stub)'
+        }).on('change', (ev) => {
+            const cb = callbacks.onStage2Toggle || (() => {});
+            cb('global_knots', ev.value);
+        });
+        this.stage2Folder.addBinding(this.stage2Params, 'showBasisTimelineSteps', {
+            label: 'Open Basis Timeline →',
+        }).on('change', (ev) => {
+            const cb = callbacks.onStage2Toggle || (() => {});
+            cb('basis_timeline_steps', ev.value);
+        });
+
+        // Stage 3: Theoretical Manifold. Placeholder for the
+        // cp-propagation §3.2 nominal-flow intermediate; the v1.2
+        // NominalManifold surface already lives under Stage 4's Output
+        // Surfaces, so this folder only carries forward-looking toggles
+        // for now. The single stub toggle reads from the case envelope
+        // when present and stays inert otherwise.
+        this.stage3Folder = this.pane.addFolder({
+            title: 'Stage 3: Theoretical Manifold',
+            expanded: false,
+        });
+        this.stage3Params = { showNominalSurface: true };
+        this.stage3Folder.addBinding(this.stage3Params, 'showNominalSurface', {
+            label: 'Nominal Surface (stub)'
+        }).on('change', (ev) => {
+            const cb = callbacks.onStage3Toggle || (() => {});
+            cb('nominal_surface', ev.value);
+        });
+
+        // Stage 4: Output Surfaces — preserves the original
+        // FreeBlend3D / AffineTransport / NominalManifold section-mode
+        // toggles. Intermediate Geometry (v-samples / v-sections /
+        // proxied-guides / displacement-vectors) moves into a nested
+        // folder under Stage 4, mirroring the previous two-folder pair.
+        this.stage4Folder = this.pane.addFolder({
+            title: 'Stage 4: Output Surfaces',
+            expanded: true,
+        });
+        this.sectionModeFolder = this.stage4Folder.addFolder({
+            title: 'Section Modes',
+            expanded: true,
         });
         this.sectionModeParams = { freeblend3d: true, affinetransport: true, nominalmanifold: true };
         this.sectionModeFolder.addBinding(this.sectionModeParams, 'freeblend3d', {
@@ -123,13 +248,7 @@ export class UIController {
                 callbacks.onSectionModeChange('NominalManifold', ev.value);
             }
         });
-
-        // Intermediate Geometry (v1.2+): guide-curve × sampling-plane
-        // intersection points from `intermediate_products.v_samples[]`.
-        // main.js wires the toggle via updateIntermediateGeometry(); when
-        // the case has no v_samples data main.js skips that call and the
-        // checkbox is a no-op.
-        this.intermediateGeometryFolder = this.pane.addFolder({
+        this.intermediateGeometryFolder = this.stage4Folder.addFolder({
             title: 'Intermediate Geometry',
             expanded: true,
         });
@@ -159,35 +278,6 @@ export class UIController {
             if (cb) cb('displacement_vectors', ev.value);
         });
 
-        this.surfaceFolder = this.pane.addFolder({
-            title: 'Input Geometries',
-            expanded: true
-        });
-
-        this.curveFolder = this.pane.addFolder({
-            title: 'Curves',
-            expanded: false
-        });
-
-        const displayFolder = this.pane.addFolder({
-            title: 'Visuals',
-        });
-
-        displayFolder.addBinding(this.params, 'wireframe', { label: 'Wireframe' })
-            .on('change', (ev) => callbacks.onWireframeToggle(ev.value));
-
-        displayFolder.addBinding(this.params, 'showControlPolygon', { label: 'Control Polygon' })
-            .on('change', (ev) => callbacks.onControlPolygonToggle(ev.value));
-
-        displayFolder.addBinding(this.params, 'showNormals', { label: 'Show Normals' })
-            .on('change', (ev) => callbacks.onNormalsToggle(ev.value));
-
-        displayFolder.addBinding(this.params, 'grid', { label: 'Show Grid' })
-            .on('change', (ev) => callbacks.onGridToggle(ev.value));
-
-        displayFolder.addBinding(this.params, 'color', { label: 'Mesh Color' })
-            .on('change', (ev) => callbacks.onColorChange(ev.value));
-
         const actionsFolder = this.pane.addFolder({
             title: 'Actions',
         });
@@ -197,6 +287,48 @@ export class UIController {
         }).on('click', () => {
             callbacks.onReload();
         });
+    }
+
+    /**
+     * Wire the per-stage callbacks into the UIController so the
+     * previously-floating bindings (Stage 1 / 2 / 3 toggles) can
+     * dispatch their changes through main.js. Stored as instance
+     * references so updateStage1/2/3* can refresh the checkbox state
+     * after data loads (e.g. force the seam-markers toggle OFF if the
+     * new case lacks stage1_coupling data).
+     */
+    setStage1Callback(cb) {
+        this._onStage1Toggle = cb;
+    }
+    setStage2Callback(cb) {
+        this._onStage2Toggle = cb;
+    }
+    setStage3Callback(cb) {
+        this._onStage3Toggle = cb;
+    }
+
+    /**
+     * Reset Stage-1 toggles to OFF and refresh. Called by main.js
+     * whenever a new case loads so the reviewer can't be left looking
+     * at seam markers from a previous case that aren't in the current
+     * one.
+     */
+    resetStage1Toggles() {
+        if (!this.stage1Params) return;
+        this.stage1Params.showSeamMarkers = false;
+        this.stage1Params.showTangentArrows = false;
+        this.stage1Params.showRulingLines = false;
+        if (this.pane) this.pane.refresh();
+    }
+
+    /**
+     * Reset Stage-2 toggles. Same rationale as resetStage1Toggles.
+     */
+    resetStage2Toggles() {
+        if (!this.stage2Params) return;
+        this.stage2Params.showGlobalKnots = false;
+        this.stage2Params.showBasisTimelineSteps = false;
+        if (this.pane) this.pane.refresh();
     }
 
     /**

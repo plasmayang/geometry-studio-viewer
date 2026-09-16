@@ -2,6 +2,8 @@ import { Viewer3D } from './Viewer3D.js';
 import { GeometryParser } from './GeometryParser.js';
 import { UIController } from './UIController.js';
 import { ProtocolSource } from './data-sources/ProtocolSource.js';
+import { TimelinePanel } from './TimelinePanel.js';
+import './timeline.css';
 
 // Runtime config injected at build time by vite.config.js. Vite's
 // `define` option replaces the bare identifier with the JSON string
@@ -42,6 +44,14 @@ class App {
         this.manifestPath = 'manifest.json';
         this.protocolSource = null;         // protocol-mode only
         this.caseNameFilter = '';           // user-typed case-name substring (CJK-safe)
+        // Active workspace tab: 'scene' (Tab 1) or 'timeline' (Tab 2).
+        this.activeTab = 'scene';
+        // TimelinePanel is constructed lazily on first Tab 2 entry so
+        // the initial render cost is paid only when the reviewer
+        // actually asks for it. Recreated whenever the case changes
+        // (old instance is disposed to release WebGL contexts).
+        this.timelinePanel = null;
+        this.currentCaseData = null;        // last rendered case JSON (Tab 2 cache)
 
         if (this.mode === 'protocol') {
             this.protocolSource = new ProtocolSource(
@@ -54,12 +64,73 @@ class App {
     async init() {
         const container = document.getElementById('app');
         this.viewer.init(container);
+        this._wireTabs();
         await this._initUI();
         if (this.mode === 'directory') {
             await this.refreshGallery();
         } else {
             this.protocolSource.start();
         }
+    }
+
+    // ---- tab strip (DOM, NOT Tweakpane) --------------------------------
+
+    _wireTabs() {
+        const tabs = document.querySelectorAll('.workspace-tab');
+        if (tabs.length === 0) return;
+        tabs.forEach(tab => {
+            if (tab._wired) return;
+            tab._wired = true;
+            tab.addEventListener('click', () => {
+                const next = tab.dataset.tab || 'scene';
+                this._switchTab(next);
+            });
+        });
+    }
+
+    _switchTab(name) {
+        if (name !== 'scene' && name !== 'timeline') return;
+        this.activeTab = name;
+        const tabs = document.querySelectorAll('.workspace-tab');
+        tabs.forEach(t => {
+            t.classList.toggle('active', (t.dataset.tab || '') === name);
+        });
+        const sceneContainer = document.getElementById('app');
+        const timelineContainer = document.getElementById('timeline-container');
+        const showScene = (name === 'scene');
+        if (sceneContainer) {
+            sceneContainer.style.display = showScene ? '' : 'none';
+        }
+        if (timelineContainer) {
+            timelineContainer.style.display = showScene ? 'none' : '';
+        }
+        if (name === 'timeline') {
+            // Lazy-build the timeline panel — if no case data is loaded
+            // yet, the panel renders the "No timeline data for this
+            // case" placeholder so the user sees something rather than
+            // an empty white box.
+            this._ensureTimelinePanel();
+            // Force a window resize so any newly-sized timeline cards
+            // commit their renderer dimensions on first paint.
+            window.dispatchEvent(new Event('resize'));
+        } else if (this.timelinePanel) {
+            // Switching away from Tab 2 → drop the WebGL contexts so
+            // they don't keep ticking the GPU. Reconstructed on return.
+            this.timelinePanel.dispose();
+            this.timelinePanel = null;
+        }
+    }
+
+    _ensureTimelinePanel() {
+        const container = document.getElementById('timeline-container');
+        if (!container) return;
+        if (this.timelinePanel) {
+            // Already alive; refresh on every case-data change so a new
+            // case doesn't show stale cards.
+            this.timelinePanel.update(this.currentCaseData);
+            return;
+        }
+        this.timelinePanel = new TimelinePanel(container, this.currentCaseData);
     }
 
     // ---- UI init (shared) -------------------------------------------------
@@ -116,6 +187,9 @@ class App {
                     else if (label === 'proxied_guides') this.viewer.setProxiedGuidesVisibility(visible);
                     else if (label === 'displacement_vectors') this.viewer.setDisplacementVectorsVisibility(visible);
                 },
+                onStage1Toggle: (kind, visible) => this._onStage1Toggle(kind, visible),
+                onStage2Toggle: (kind, visible) => this._onStage2Toggle(kind, visible),
+                onStage3Toggle: (kind, visible) => this._onStage3Toggle(kind, visible),
                 ...baseCallbacks,
             });
         } else {
@@ -129,9 +203,37 @@ class App {
                     this.currentCase = { source: 'protocol', ...caseRef };
                     this.loadData();
                 },
+                onStage1Toggle: (kind, visible) => this._onStage1Toggle(kind, visible),
+                onStage2Toggle: (kind, visible) => this._onStage2Toggle(kind, visible),
+                onStage3Toggle: (kind, visible) => this._onStage3Toggle(kind, visible),
                 ...baseCallbacks,
             });
         }
+    }
+
+    // ---- Stage 1/2/3 callback dispatchers ----------------------------
+
+    _onStage1Toggle(kind, visible) {
+        if (!this.viewer) return;
+        if (kind === 'seam_markers') this.viewer.setSeamMarkersVisibility(visible);
+        else if (kind === 'tangent_arrows') this.viewer.setTangentArrowsVisibility(visible);
+        else if (kind === 'ruling_lines') this.viewer.setRulingLinesVisibility(visible);
+    }
+
+    _onStage2Toggle(kind, visible) {
+        if (kind === 'basis_timeline_steps' && visible) {
+            // Cross-tab signal: jump to Tab 2 when the reviewer ticks
+            // the "Open Basis Timeline" checkbox. Toggling OFF does
+            // nothing (Tab 2 stays where it is).
+            this._switchTab('timeline');
+        }
+        // global_knots: future feature; toggle is inert for now.
+    }
+
+    _onStage3Toggle(kind, visible) {
+        // Stub — placeholder for the cp-propagation §3.2 intermediate.
+        // Currently the NominalManifold surface toggle lives under
+        // Stage 4 (Section Modes), so this hook stays inert.
     }
 
     // ---- directory mode: refresh manifest from disk -------------------
@@ -223,6 +325,15 @@ class App {
             return;
         }
         console.log('Case Loaded:', jsonData.caseName);
+
+        // Cache the full envelope so Tab 2 (U-Basis Timeline) can
+        // re-render on demand without re-fetching the case JSON. Reset
+        // any open TimelinePanel so a stale card row isn't shown for a
+        // case the user no longer has selected.
+        this.currentCaseData = jsonData;
+        if (this.timelinePanel) {
+            this.timelinePanel.update(jsonData);
+        }
 
         document.getElementById('case-title').innerText = jsonData.caseName || jsonData.name || 'Untitled Case';
 
@@ -348,12 +459,25 @@ class App {
             return;
         }
 
-        const { geometry, markers, nurbs, audit, movingFrame, samplingPlane } = GeometryParser.parseMesh(jsonData);
+        const { geometry, markers, nurbs, audit, movingFrame, samplingPlane, debug } = GeometryParser.parseMesh(jsonData);
         // spec 0002: bundle aux-viz arrays; loadMesh builds the
         // groups AFTER bbox is known (scale = 0.1 × bbox_diagonal).
         const extras = { movingFrame, samplingPlane };
         const { surfaceLabels, curveLabels, auditLayers } =
             this.viewer.loadMesh(geometry, markers, nurbs, audit, extras);
+
+        // Stage-1 (Profile Coupling) debug overlays — populate the
+        // three Groups (seam markers / tangent arrows / ruling lines)
+        // from case.debug.stage1_coupling when present. The renderer
+        // handles missing input as a no-op + console.info.
+        this.viewer.setCouplingDebug(debug ? debug.stage1_coupling : null);
+        // Reset Stage-1 + Stage-2 checkboxes on every case change so a
+        // reviewer can't be left looking at seam markers from a
+        // previous case that the current case doesn't actually carry.
+        if (this.ui) {
+            if (typeof this.ui.resetStage1Toggles === 'function') this.ui.resetStage1Toggles();
+            if (typeof this.ui.resetStage2Toggles === 'function') this.ui.resetStage2Toggles();
+        }
 
         if (this.ui) {
             // spec 0002: cache envelope BEFORE updateCurveToggles so

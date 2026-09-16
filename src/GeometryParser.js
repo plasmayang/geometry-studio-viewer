@@ -81,7 +81,116 @@ export class GeometryParser {
             // Mirrors `nurbs.proxiedGuides` so direct consumers (tests,
             // ad-hoc UIs) do not have to dig through `nurbs.*`.
             proxiedGuides: Array.isArray(nurbs?.proxiedGuides) ? nurbs.proxiedGuides : [],
+            // Spec 0005: case.debug envelope (Stage-1 coupling + Stage-2
+            // U-basis timeline). Optional — older cases predate this
+            // schema and the renderer treats its absence as no-op.
+            debug: this.parseDebug(jsonData),
         };
+    }
+
+    /**
+     * Parse the optional `case.debug` envelope carrying Stage-1
+     * (Profile Coupling) and Stage-2 (Universal Basis U) visualization
+     * data. Returns null when the field is absent (legacy envelopes)
+     * so callers can guard with a single null-check instead of digging
+     * through nested keys. The shape mirrors the schema Task B
+     * publishes; missing sub-fields default to null so each consumer
+     * can short-circuit independently.
+     */
+    static parseDebug(jsonData) {
+        const dbg = jsonData && jsonData.debug;
+        if (!dbg || typeof dbg !== 'object') return null;
+        const stage1Coupling = this._parseStage1Coupling(dbg.stage1_coupling);
+        const stage2Timeline = this._parseStage2Timeline(dbg.stage2_basis_u_timeline);
+        // If both sub-fields are missing, treat the whole debug envelope
+        // as absent — keeps the legacy "no debug data" UX clean.
+        if (!stage1Coupling && !stage2Timeline) return null;
+        return {
+            stage1_coupling: stage1Coupling,
+            stage2_basis_u_timeline: stage2Timeline,
+        };
+    }
+
+    /**
+     * Stage-1 (Profile Coupling) debug: a list of seam entries (one per
+     * profile seam marker with start_point + tangent_vector) and a list
+     * of ruling-line entries (each connecting two profile points).
+     * Both lists default to [] when absent. Returns null when neither
+     * list is present so the parser can omit the wrapper entirely.
+     */
+    static _parseStage1Coupling(raw) {
+        if (!raw || typeof raw !== 'object') return null;
+        const seams = [];
+        if (Array.isArray(raw.seams)) {
+            for (const s of raw.seams) {
+                if (!s || typeof s !== 'object') continue;
+                const start = Array.isArray(s.start_point) && s.start_point.length >= 3
+                    ? [s.start_point[0], s.start_point[1], s.start_point[2]]
+                    : null;
+                const tangentRaw = Array.isArray(s.tangent) ? s.tangent
+                    : (Array.isArray(s.tangent_vector) ? s.tangent_vector : null);
+                const tangent = tangentRaw && tangentRaw.length >= 3
+                    ? [tangentRaw[0], tangentRaw[1], tangentRaw[2]]
+                    : null;
+                if (!start || !tangent) continue;
+                const color = (typeof s.color === 'string') ? s.color : '#ff8844';
+                const profileIndex = (typeof s.profile_index === 'number') ? s.profile_index : -1;
+                const label = (typeof s.label === 'string') ? s.label : '';
+                seams.push({ start_point: start, tangent_vector: tangent, color, profile_index: profileIndex, label });
+            }
+        }
+        const rulingLines = [];
+        if (Array.isArray(raw.ruling_lines)) {
+            for (const rl of raw.ruling_lines) {
+                if (!rl || typeof rl !== 'object') continue;
+                const from = Array.isArray(rl.from) && rl.from.length >= 3
+                    ? [rl.from[0], rl.from[1], rl.from[2]] : null;
+                const to = Array.isArray(rl.to) && rl.to.length >= 3
+                    ? [rl.to[0], rl.to[1], rl.to[2]] : null;
+                if (!from || !to) continue;
+                const color = (typeof rl.color === 'string') ? rl.color : '#ff6633';
+                rulingLines.push({ from, to, color });
+            }
+        }
+        if (seams.length === 0 && rulingLines.length === 0) return null;
+        return { seams, ruling_lines: rulingLines };
+    }
+
+    /**
+     * Stage-2 (Universal Basis U) timeline: an array of step objects.
+     * Each step carries its own list of profiles (each with
+     * degree/control_points/knots) so the renderer can display the
+     * knot-insertion evolution step-by-step. Returns null when the
+     * timeline is missing or empty.
+     */
+    static _parseStage2Timeline(raw) {
+        if (!Array.isArray(raw) || raw.length === 0) return null;
+        const steps = [];
+        for (const step of raw) {
+            if (!step || typeof step !== 'object') continue;
+            const stepName = (typeof step.step_name === 'string') ? step.step_name : '';
+            const description = (typeof step.description === 'string') ? step.description : '';
+            const profilesRaw = Array.isArray(step.profiles) ? step.profiles : [];
+            const profiles = [];
+            for (const p of profilesRaw) {
+                if (!p || typeof p !== 'object') continue;
+                const cps = Array.isArray(p.control_points) ? flattenControlPoints(p.control_points) : null;
+                if (!cps || cps.length === 0) continue;
+                const knots = Array.isArray(p.knots) ? Array.from(p.knots) : null;
+                const degree = (typeof p.degree === 'number') ? p.degree
+                    : ((typeof p.p === 'number') ? p.p : 3);
+                profiles.push({
+                    label: (typeof p.label === 'string') ? p.label : '',
+                    degree,
+                    knots,
+                    control_points: cps,
+                    dim: (typeof p.dim === 'number') ? p.dim : 3,
+                });
+            }
+            steps.push({ step_name: stepName, description, profiles });
+        }
+        if (steps.length === 0) return null;
+        return steps;
     }
 
     /** spec 0002: top-level `moving_frame[]` (one per spine v-station). */
