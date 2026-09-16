@@ -24,13 +24,16 @@ const PSI_SERIES_COLORS = [
 ];
 
 export class AuditPanel {
-    constructor({ audit, onToggleLayer, onSelectPsiSample }) {
+    constructor({ audit, onToggleLayer, onSelectPsiSample, container }) {
         this.audit = audit;
         this.onToggleLayer = onToggleLayer;
         this.onSelectPsiSample = onSelectPsiSample || (() => {});
         this.pane = new Pane({
             title: 'Audit & Intermediate Products',
             expanded: true,
+            // Tweakpane defaults to document.body; explicit container
+            // keeps this panel inside #coupling-container for Tab 2.
+            container: container || undefined,
         });
         this.layerParams = {};
         this._build();

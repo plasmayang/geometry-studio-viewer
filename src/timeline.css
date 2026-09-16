@@ -40,141 +40,242 @@
     background: rgba(25, 118, 210, 0.06);
 }
 
-/* Tab 2: timeline container. Sits below the tab strip and fills the
-   remaining viewport height. Hidden when Tab 1 is active. */
+/* Tab 2 (Profile Coupling): viewport + side panel. Sits below the
+   tab strip and fills the remaining viewport height. Hidden when
+   Tab 1 or Tab 3 is active. The shared Viewer3D canvas is re-parented
+   into #coupling-viewport by main.js on tab switch; the side panel
+   is built by UIController.createCouplingPanel. */
+#coupling-container {
+    display: none;
+    width: 100vw;
+    height: calc(100vh - 48px);
+    overflow: hidden;
+    background: #f5f7fa;
+    box-sizing: border-box;
+    /* duplicate display: when JS sets style.display='' the inline rule
+       is removed and the cascade falls through to display: flex below. */
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+}
+
+#coupling-viewport {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    position: relative;
+    background: #fafafa;
+}
+
+#coupling-side-panel {
+    flex: 0 0 320px;
+    max-width: 320px;
+    width: 320px;
+    overflow-y: auto;
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(10px);
+    border-left: 1px solid #e0e0e0;
+    box-sizing: border-box;
+}
+
+/* Tab 3 (U-Basis Timeline): full-height single-canvas workspace.
+   The TimelinePanel manages its own internal layout (.timeline-root)
+   so the container only needs to fill the area below the tab strip. */
 #timeline-container {
     display: none;
     width: 100vw;
     height: calc(100vh - 48px);
-    overflow-x: auto;
-    overflow-y: hidden;
-    display: flex;
-    flex-direction: row;
-    gap: 16px;
-    padding: 16px;
     background: #f5f7fa;
     box-sizing: border-box;
-    align-items: flex-start;
-}
-#timeline-container:not([style*="display"]) {
-    /* default hidden — main.js toggles display style on tab switch */
+    overflow: hidden;
+    /* duplicate display: same cascade-overriding pattern as
+       #coupling-container above — see comment there. */
+    display: flex;
 }
 
-/* Each card: a fixed-width column with header / meta / canvas. */
-.timeline-card {
-    flex: 0 0 auto;
-    width: 360px;
-    background: white;
-    border: 1px solid #ccc;
-    border-radius: 6px;
-    padding: 8px;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
-    display: flex;
-    flex-direction: column;
-}
-.timeline-card-header {
-    border-bottom: 1px solid #eee;
-    padding-bottom: 6px;
-    margin-bottom: 6px;
-}
-.timeline-card-title {
-    font-weight: 600;
-    font-size: 13px;
-    color: #1a1a1a;
-    line-height: 1.3;
-}
-.timeline-card-desc {
-    font-size: 11px;
-    color: #777;
-    line-height: 1.3;
-    margin-top: 2px;
-}
-.timeline-card-meta {
-    font-family: monospace;
-    font-size: 10px;
-    color: #555;
-    margin-bottom: 6px;
-}
-.timeline-card-canvas {
-    width: 100%;
-    height: auto;
-    background: #fafafa;
-    border: 1px solid #eee;
-    border-radius: 4px;
-    display: block;
-    cursor: zoom-in;
-}
-.timeline-card-expand-hint {
-    font-size: 10px;
-    color: #888;
-    text-align: center;
-    margin-top: 6px;
-    font-style: italic;
-}
-
-/* Fullscreen overlay that shows one card's step at viewport scale.
-   Click outside the canvas or the close button to dismiss. */
-.timeline-card-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-    background: rgba(15, 20, 30, 0.92);
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    box-sizing: border-box;
-    cursor: zoom-out;
-}
-.timeline-card-overlay-title {
-    color: #fff;
-    font-size: 14px;
-    font-weight: 600;
-    padding: 8px 12px;
-    background: rgba(255, 255, 255, 0.08);
-    border-radius: 4px;
-    margin-bottom: 12px;
-    flex: 0 0 auto;
-    font-family: monospace;
-}
-.timeline-card-overlay-canvas {
-    flex: 1 1 auto;
+/* Workspace root — flex column with title bar / canvas / stepper. */
+.timeline-root {
     width: 100%;
     height: 100%;
-    background: #fafafa;
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    background: #f5f7fa;
+    box-sizing: border-box;
+}
+
+/* Title bar — current step name + description + diff badge. */
+.timeline-titlebar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 16px;
+    background: rgba(255, 255, 255, 0.92);
+    border-bottom: 1px solid #e0e0e0;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+    min-height: 44px;
+}
+.timeline-titlebar-step {
+    font-weight: 600;
+    font-size: 14px;
+    color: #1a1a1a;
+    line-height: 1.3;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    white-space: nowrap;
+}
+.timeline-titlebar-desc {
+    flex: 1 1 auto;
+    font-size: 12px;
+    color: #555;
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.timeline-diff-badge {
+    flex: 0 0 auto;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-size: 11px;
+    color: #444;
+    background: rgba(25, 118, 210, 0.07);
+    border: 1px solid rgba(25, 118, 210, 0.25);
     border-radius: 4px;
+    padding: 4px 10px;
+    line-height: 1.3;
+    max-width: 50%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Canvas wrapper — flex 1 so the Three.js renderer fills the
+   remaining space between title bar and stepper. */
+.timeline-canvas-wrap {
+    flex: 1 1 auto;
+    position: relative;
+    min-height: 0;
+    overflow: hidden;
+    background: #f5f7fa;
+}
+.timeline-canvas {
+    width: 100%;
+    height: 100%;
     display: block;
+    background: #f5f7fa;
     cursor: grab;
 }
-.timeline-card-overlay-close {
+.timeline-canvas:active { cursor: grabbing; }
+
+/* Floating numerical badge — right side of the canvas. Mirrors the
+   reviewer's request for "full math" (degree, #CP, knot vec length,
+   ghost Δ) alongside the symbolic diff badge in the title bar. */
+.timeline-numeric-badge {
     position: absolute;
-    top: 24px;
-    right: 24px;
-    z-index: 1001;
-    background: #ffffff;
-    color: #333;
-    border: 1px solid #ccc;
+    top: 12px;
+    right: 12px;
+    z-index: 5;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid #ddd;
     border-radius: 4px;
-    padding: 6px 14px;
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    padding: 8px 12px;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-size: 11px;
+    color: #222;
+    line-height: 1.5;
+    white-space: pre;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+    pointer-events: none;
 }
-.timeline-card-overlay-close:hover {
-    background: #f5f5f5;
+
+/* Stepper bar — horizontally scrolling button row + Play/Pause. */
+.timeline-stepper {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.92);
+    border-top: 1px solid #e0e0e0;
+    box-shadow: 0 -1px 4px rgba(0, 0, 0, 0.04);
+    min-height: 52px;
+    box-sizing: border-box;
+}
+.timeline-stepper-play {
+    flex: 0 0 auto;
+    border: 1px solid #1976d2;
+    background: #1976d2;
+    color: #fff;
+    padding: 6px 14px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    min-width: 84px;
+}
+.timeline-stepper-play:hover {
+    background: #1565c0;
+    border-color: #1565c0;
+}
+.timeline-stepper-play.playing {
+    background: #fff;
+    color: #1976d2;
+    border-color: #1976d2;
+}
+.timeline-stepper-list {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 2px 0;
+    min-width: 0;
+}
+.timeline-stepper-btn {
+    flex: 0 0 auto;
+    border: 1px solid #ccc;
+    background: #fff;
+    color: #333;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.timeline-stepper-btn:hover {
     border-color: #1976d2;
     color: #1976d2;
 }
+.timeline-stepper-btn.active {
+    border-color: #1976d2;
+    border-width: 2px;
+    padding: 5px 11px; /* compensate for thicker border so layout doesn't jump */
+    color: #1976d2;
+    background: rgba(25, 118, 210, 0.08);
+    font-weight: 600;
+}
 
 /* Empty-state message when case.debug.stage2_basis_u_timeline is
-   missing — centered horizontally and vertically inside the
-   scroll container. */
+   missing — centered horizontally and vertically inside the canvas
+   wrapper (overlay so it sits on top of whatever the canvas paints). */
 .timeline-empty-state {
-    margin: auto;
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     font-size: 14px;
     color: #666;
-    text-align: center;
-    padding: 40px;
+    pointer-events: none;
 }
 
 /* Tab 1 viewer container is hidden when Tab 2 is active. */

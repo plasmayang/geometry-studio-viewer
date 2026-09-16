@@ -35,6 +35,16 @@ export class Viewer3D {
         this.displacementVectors = [];
         this.vSectionLines = [];
         this.proxiedGuideLines = [];
+        // Cached Stage-1 scene bbox: recomputed by setCouplingDebug on
+        // every case load. Holds Vector3 min/max/center and a scalar
+        // diagonal. Empty scenes fall back to diagonal=1 so scale
+        // formulas don't divide by zero.
+        this.stage1BBox = {
+            min: new THREE.Vector3(-0.5, -0.5, -0.5),
+            max: new THREE.Vector3(0.5, 0.5, 0.5),
+            center: new THREE.Vector3(0, 0, 0),
+            diagonal: 1.0,
+        };
 
         this.scene.add(this.markersGroup);
         this.scene.add(this.nurbsGroup);
@@ -1209,8 +1219,17 @@ export class Viewer3D {
      * driven by the separate setters below. Defensive against missing
      * input (legacy envelopes): toggles the groups invisible and
      * console-logs a one-liner.
+     *
+     * Stage-1 marker sizes are bbox-relative (scale invariance): the
+     * scene bbox is computed from the union of currently-loaded
+     * geometries (mesh + nurbs + audit + skeleton + Stage 1 markers),
+     * and seam-sphere radius / tangent-arrow length are fractions of
+     * that diagonal with hard clamps so they remain readable on
+     * millimeter-scale and meter-scale cases alike.
      */
     setCouplingDebug(coupling) {
+        this._recomputeStage1BBox();
+
         if (!coupling || typeof coupling !== 'object') {
             console.info('Viewer3D: no stage1_coupling debug data — overlays hidden.');
             if (this.seamMarkersGroup) this.seamMarkersGroup.visible = false;
@@ -1221,12 +1240,21 @@ export class Viewer3D {
         const seams = Array.isArray(coupling.seams) ? coupling.seams : [];
         const rulingLines = Array.isArray(coupling.ruling_lines) ? coupling.ruling_lines : [];
 
+        // Scale-invariant dimensions (clamped). All ratios come from the
+        // spec's "Scale Invariance" clause (Task B §4 Viewer3D.js).
+        const diagonal = this.stage1BBox.diagonal;
+        const seamRadius = Math.max(0.005, Math.min(0.2, diagonal * 0.015));
+        const tangentLength = Math.max(0.05, Math.min(1.5, diagonal * 0.06));
+        const tangentHeadLen = Math.max(0.02, Math.min(0.6, diagonal * 0.014));
+        const tangentHeadWidth = Math.max(0.01, Math.min(0.4, diagonal * 0.009));
+        const rulingEndRadius = seamRadius;
+
         // Seam markers: one sphere + label sprite per seam.
         for (const seam of seams) {
             if (!seam || !Array.isArray(seam.start_point) || seam.start_point.length < 3) continue;
             const [x, y, z] = seam.start_point;
             const colorHex = this._hexFromColorString(seam.color, 0xff8844);
-            const sphereGeom = new THREE.SphereGeometry(0.05, 16, 16);
+            const sphereGeom = new THREE.SphereGeometry(seamRadius, 16, 16);
             const sphereMat = new THREE.MeshBasicMaterial({ color: colorHex });
             const sphere = new THREE.Mesh(sphereGeom, sphereMat);
             sphere.position.set(x, y, z);
@@ -1235,13 +1263,10 @@ export class Viewer3D {
             sphere.userData.kind = 'seam_marker';
             this.seamMarkersGroup.add(sphere);
 
-            // Optional label sprite — only if a label is provided
-            // (avoids the cost of generating canvas textures for every
-            // unnamed seam).
             if (seam.label) {
                 try {
                     const sprite = this._makeAnnoSprite(seam.label, colorHex, 0.5);
-                    sprite.position.set(x, y + 0.08, z);
+                    sprite.position.set(x, y + seamRadius * 1.6, z);
                     sprite.userData.label = seam.label;
                     this.seamMarkersGroup.add(sprite);
                 } catch (e) { /* label sprites are best-effort */ }
@@ -1261,7 +1286,9 @@ export class Viewer3D {
             const dir = tangent.clone().multiplyScalar(1 / len);
             const origin = new THREE.Vector3(x, y, z);
             const colorHex = this._hexFromColorString(seam.color, 0xff8844);
-            const arrow = new THREE.ArrowHelper(dir, origin, 0.5, colorHex, 0.12, 0.08);
+            const arrow = new THREE.ArrowHelper(
+                dir, origin, tangentLength, colorHex, tangentHeadLen, tangentHeadWidth
+            );
             arrow.userData.label = seam.label || `tangent_p${seam.profile_index ?? '?'}`;
             arrow.userData.kind = 'tangent_arrow';
             this.tangentArrowsGroup.add(arrow);
@@ -1296,7 +1323,7 @@ export class Viewer3D {
             line.userData.material = lineMat;
             this.rulingLinesGroup.add(line);
 
-            const endSphereGeom = new THREE.SphereGeometry(0.025, 12, 12);
+            const endSphereGeom = new THREE.SphereGeometry(rulingEndRadius, 12, 12);
             const endSphereMat = new THREE.MeshBasicMaterial({ color: colorHex });
             this.rulingLinesGroup.add(new THREE.Mesh(endSphereGeom, endSphereMat).translateX(fromV.x).translateY(fromV.y).translateZ(fromV.z));
             this.rulingLinesGroup.add(new THREE.Mesh(endSphereGeom, endSphereMat).translateX(toV.x).translateY(toV.y).translateZ(toV.z));
@@ -1304,8 +1331,142 @@ export class Viewer3D {
 
         console.info(
             `Viewer3D: stage1_coupling built (seams=${seams.length}, `
-            + `ruling_lines=${rulingLines.length}).`
+            + `ruling_lines=${rulingLines.length}, diagonal=${diagonal.toFixed(3)}).`
         );
+    }
+
+    /**
+     * Recompute the Stage-1 scene bbox from the union of all currently
+     * loaded geometries (mesh + nurbsGroup + auditGroup + markers).
+     * Caches the result in `this.stage1BBox` and is called by
+     * setCouplingDebug on every case load. Empty scenes fall back to
+     * a unit diagonal so callers can divide safely.
+     */
+    _recomputeStage1BBox() {
+        const bbox = new THREE.Box3();
+        if (this.mesh && this.mesh.geometry && this.mesh.geometry.attributes.position) {
+            bbox.expandByObject(this.mesh);
+        }
+        if (this.nurbsGroup) bbox.expandByObject(this.nurbsGroup);
+        if (this.auditGroup) bbox.expandByObject(this.auditGroup);
+        if (this.markersGroup) bbox.expandByObject(this.markersGroup);
+
+        const min = new THREE.Vector3();
+        const max = new THREE.Vector3();
+        const center = new THREE.Vector3();
+        let diagonal = 1.0;
+        if (!bbox.isEmpty()) {
+            min.copy(bbox.min);
+            max.copy(bbox.max);
+            center.copy(bbox.getCenter(new THREE.Vector3()));
+            const size = new THREE.Vector3().subVectors(max, min);
+            diagonal = Math.max(1e-6, size.length());
+        }
+        this.stage1BBox = { min, max, center, diagonal };
+    }
+
+    /**
+     * Public accessor for the cached Stage-1 scene bbox. Returns a
+     * fresh object so callers can't mutate internal state. Diagonal is
+     * 1 for empty scenes.
+     */
+    getStage1SceneBBox() {
+        return {
+            min: this.stage1BBox.min.clone(),
+            max: this.stage1BBox.max.clone(),
+            center: this.stage1BBox.center.clone(),
+            diagonal: this.stage1BBox.diagonal,
+        };
+    }
+
+    /**
+     * Toggle visibility on all output surfaces (FreeBlend3D /
+     * AffineTransport / NominalManifold / etc.). Used by Tab 2 to
+     * strip the output surfaces from the coupling viewport.
+     */
+    hideSurfaces() {
+        // Hide both render paths: tessellated mesh + NURBS surfaceGroups.
+        if (this.mesh) this.mesh.visible = false;
+        if (this.normalsHelper) this.normalsHelper.visible = false;
+        if (this.wireframeMesh) this.wireframeMesh.visible = false;
+        if (!this.surfaceGroups) return;
+        for (const g of Object.values(this.surfaceGroups)) {
+            if (g) g.visible = false;
+        }
+    }
+
+    showSurfaces() {
+        if (this.mesh) this.mesh.visible = true;
+        if (this.normalsHelper) this.normalsHelper.visible = true;
+        if (this.wireframeMesh) this.wireframeMesh.visible = true;
+        if (!this.surfaceGroups) return;
+        for (const g of Object.values(this.surfaceGroups)) {
+            if (g) g.visible = true;
+        }
+    }
+
+    /**
+     * Return a Three.js Group containing every NURBS curve currently
+     * in the scene (Profiles + Spine + Guides), but NOT surfaces.
+     * The reference is stable across panel swaps and survives until
+     * loadMesh clears the nurbsGroup on the next case change.
+     */
+    getPersistentSkeletonGroup() {
+        const skeleton = new THREE.Group();
+        skeleton.name = 'persistentSkeleton';
+        if (!this.curveGroups) return skeleton;
+        for (const label of Object.keys(this.curveGroups)) {
+            const g = this.curveGroups[label];
+            if (!g) continue;
+            const wrapper = new THREE.Group();
+            wrapper.name = label;
+            for (const child of g.children) wrapper.add(child.clone(true));
+            skeleton.add(wrapper);
+        }
+        return skeleton;
+    }
+
+    /**
+     * Bulk toggle for Stage-1 overlays. Equivalent to calling the three
+     * setSeamMarkersVisibility / setTangentArrowsVisibility /
+     * setRulingLinesVisibility setters in sequence.
+     */
+    setStage1Visibility(seam, tangent, ruling) {
+        this.setSeamMarkersVisibility(!!seam);
+        this.setTangentArrowsVisibility(!!tangent);
+        this.setRulingLinesVisibility(!!ruling);
+    }
+
+    /**
+     * Force a renderer resize to the current container. Called after
+     * the canvas is re-parented (e.g. when swapping between Tab 1 and
+     * Tab 2 viewports) so the WebGL viewport + LineMaterial.resolution
+     * stay in sync.
+     */
+    handleResize() {
+        if (!this.renderer || !this.camera) return;
+        const parent = this.renderer.domElement && this.renderer.domElement.parentNode;
+        if (parent) {
+            const w = parent.clientWidth || window.innerWidth;
+            const h = parent.clientHeight || window.innerHeight;
+            this.renderer.setSize(w, h, false);
+            this.camera.aspect = w / h;
+            this.camera.updateProjectionMatrix();
+        } else {
+            this.renderer.setSize(window.innerWidth, window.innerHeight);
+            this.camera.aspect = window.innerWidth / window.innerHeight;
+            this.camera.updateProjectionMatrix();
+        }
+        if (this.rulingLinesGroup) {
+            this.rulingLinesGroup.traverse((obj) => {
+                if (obj.userData && obj.userData.material
+                    && obj.userData.material.resolution) {
+                    obj.userData.material.resolution.set(
+                        window.innerWidth, window.innerHeight,
+                    );
+                }
+            });
+        }
     }
 
     /**

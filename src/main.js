@@ -38,20 +38,27 @@ class App {
     constructor() {
         this.viewer = new Viewer3D();
         this.mode = VIEWER_CONFIG.mode || 'directory';
-        this.manifest = [];                 // flat case list (mode-dependent shape)
-        this.currentCase = null;            // mode-specific reference
-        this.dataSourceBase = null;         // directory-mode only
+        this.manifest = [];
+        this.currentCase = null;
+        this.dataSourceBase = null;
         this.manifestPath = 'manifest.json';
-        this.protocolSource = null;         // protocol-mode only
-        this.caseNameFilter = '';           // user-typed case-name substring (CJK-safe)
-        // Active workspace tab: 'scene' (Tab 1) or 'timeline' (Tab 2).
+        this.protocolSource = null;
+        this.caseNameFilter = '';
+        // 'scene' (Tab 1) | 'coupling' (Tab 2) | 'timeline' (Tab 3)
         this.activeTab = 'scene';
-        // TimelinePanel is constructed lazily on first Tab 2 entry so
-        // the initial render cost is paid only when the reviewer
-        // actually asks for it. Recreated whenever the case changes
-        // (old instance is disposed to release WebGL contexts).
+        // Tab-2 side-panel (Stage 1 toggles + diagnostics table)
+        this.couplingPanel = null;
+        // Tab-3 TimelinePanel (built lazily, recreated on case change)
         this.timelinePanel = null;
-        this.currentCaseData = null;        // last rendered case JSON (Tab 2 cache)
+        // Persistent skeleton (Profiles/Spine/Guides) shared by Tab 2 + Tab 3;
+        // rebuilt only on case change, survives panel swaps.
+        this.couplingSceneGroup = null;
+        this.currentCaseData = null;
+        // Cached audit payload so Tab 2 can rebuild the AuditPanel
+        // inside #coupling-container when the user enters the tab,
+        // instead of mounting it on document.body at case load.
+        this.currentAudit = null;
+        this.currentAuditLayers = null;
 
         if (this.mode === 'protocol') {
             this.protocolSource = new ProtocolSource(
@@ -89,35 +96,125 @@ class App {
     }
 
     _switchTab(name) {
-        if (name !== 'scene' && name !== 'timeline') return;
+        if (name !== 'scene' && name !== 'coupling' && name !== 'timeline') return;
         this.activeTab = name;
         const tabs = document.querySelectorAll('.workspace-tab');
         tabs.forEach(t => {
             t.classList.toggle('active', (t.dataset.tab || '') === name);
         });
         const sceneContainer = document.getElementById('app');
+        const couplingContainer = document.getElementById('coupling-container');
         const timelineContainer = document.getElementById('timeline-container');
+        const infoPanel = document.getElementById('info-panel');
         const showScene = (name === 'scene');
+        const showCoupling = (name === 'coupling');
+        const showTimeline = (name === 'timeline');
+        // Case-selector panel overlays the canvas on Tab 2/3; only keep it
+        // visible on the 3D Scene tab.
+        if (infoPanel) {
+            infoPanel.style.display = showScene ? '' : 'none';
+        }
         if (sceneContainer) {
             sceneContainer.style.display = showScene ? '' : 'none';
         }
-        if (timelineContainer) {
-            timelineContainer.style.display = showScene ? 'none' : '';
+        if (couplingContainer) {
+            couplingContainer.style.display = showCoupling ? 'flex' : 'none';
         }
+        if (timelineContainer) {
+            timelineContainer.style.display = showTimeline ? 'flex' : 'none';
+        }
+
+        if (name === 'coupling') {
+            // Order matters: layout must exist before reparenting so
+            // #coupling-viewport is queryable.
+            this._ensureCouplingPanel();
+            this._enterCouplingView();
+        } else {
+            if (this.couplingPanel) {
+                // Switching away from Tab 2 → dispose side-panel widgets
+                // so they don't keep tracking state in the background.
+                this.couplingPanel.dispose();
+                this.couplingPanel = null;
+            }
+            if (this.ui && this.ui.auditPanel) {
+                // AuditPanel was mounted inside #coupling-container for
+                // Tab 2; dispose it on Tab 2 exit.
+                this.ui.auditPanel.dispose();
+                this.ui.auditPanel = null;
+            }
+            // Restore the canvas to the main #app container so the
+            // shared viewer keeps rendering into its original host.
+            this._detachCouplingViewport();
+        }
+
         if (name === 'timeline') {
-            // Lazy-build the timeline panel — if no case data is loaded
-            // yet, the panel renders the "No timeline data for this
-            // case" placeholder so the user sees something rather than
-            // an empty white box.
             this._ensureTimelinePanel();
-            // Force a window resize so any newly-sized timeline cards
-            // commit their renderer dimensions on first paint.
             window.dispatchEvent(new Event('resize'));
         } else if (this.timelinePanel) {
-            // Switching away from Tab 2 → drop the WebGL contexts so
-            // they don't keep ticking the GPU. Reconstructed on return.
             this.timelinePanel.dispose();
             this.timelinePanel = null;
+        }
+    }
+
+    _enterCouplingView() {
+        if (!this.viewer || !this.viewer.renderer) return;
+        // Re-parent the renderer canvas into the Tab 2 viewport so the
+        // shared viewer keeps drawing into the now-visible container.
+        const couplingViewport = document.getElementById('coupling-viewport');
+        if (couplingViewport && this.viewer.renderer.domElement
+            && this.viewer.renderer.domElement.parentNode !== couplingViewport) {
+            couplingViewport.appendChild(this.viewer.renderer.domElement);
+            // Resize the renderer to fit the new container; the next
+            // window.resize handler will keep it in sync thereafter.
+            this.viewer.handleResize();
+        }
+        // Hide output surfaces — the coupling view shows only the
+        // skeleton (Profiles / Spine / Guides) + Stage 1 overlays.
+        this.viewer.hideSurfaces();
+        // debug_markers layer can carry surface annotations; force it
+        // OFF on Tab 2 entry so it can't override hideSurfaces().
+        if (this.viewer.auditLayers && this.viewer.auditLayers.debug_markers) {
+            this.viewer.auditLayers.debug_markers.visible = false;
+        }
+        // Stage 1 overlays default OFF on first entry; the user can
+        // toggle them via the side panel.
+        this.viewer.setStage1Visibility(false, false, false);
+    }
+
+    _detachCouplingViewport() {
+        if (!this.viewer || !this.viewer.renderer) return;
+        const sceneContainer = document.getElementById('app');
+        if (sceneContainer && this.viewer.renderer.domElement
+            && this.viewer.renderer.domElement.parentNode !== sceneContainer) {
+            sceneContainer.appendChild(this.viewer.renderer.domElement);
+            this.viewer.handleResize();
+        }
+    }
+
+    _ensureCouplingPanel() {
+        const container = document.getElementById('coupling-container');
+        if (!container) return;
+        if (!this.couplingPanel) {
+            this.couplingPanel = this.ui ? this.ui.createCouplingPanel(container, {
+                onSeamMarkersToggle: (v) => this.viewer.setSeamMarkersVisibility(v),
+                onTangentArrowsToggle: (v) => this.viewer.setTangentArrowsVisibility(v),
+                onRulingLinesToggle: (v) => this.viewer.setRulingLinesVisibility(v),
+            }) : null;
+        }
+        if (this.couplingPanel && this.currentCaseData) {
+            this.couplingPanel.refresh(this.currentCaseData);
+        }
+        // Build the AuditPanel inside #coupling-container so its
+        // "Debug Viz Products (VxDb Markers & Failure Overlays)"
+        // toggles ride along with Tab 2 visibility. The panel is
+        // recreated on every case load so cached audit data is fresh.
+        if (this.ui && this.currentAudit != null) {
+            this.ui.updateAuditPanel(
+                this.currentAuditLayers,
+                this.currentAudit,
+                (layerKey, visible) => this.viewer.setAuditLayer(layerKey, visible),
+                container,
+            );
         }
     }
 
@@ -125,12 +222,16 @@ class App {
         const container = document.getElementById('timeline-container');
         if (!container) return;
         if (this.timelinePanel) {
-            // Already alive; refresh on every case-data change so a new
-            // case doesn't show stale cards.
             this.timelinePanel.update(this.currentCaseData);
             return;
         }
-        this.timelinePanel = new TimelinePanel(container, this.currentCaseData);
+        // Worker A owns TimelinePanel signature; we pass the persistent
+        // skeleton via options.spineGroup so Tab 3 doesn't re-parse the
+        // entire NURBS payload on first entry.
+        this.timelinePanel = new TimelinePanel(container, this.currentCaseData, {
+            spineGroup: this.couplingSceneGroup,
+            geometryParser: GeometryParser,
+        });
     }
 
     // ---- UI init (shared) -------------------------------------------------
@@ -326,14 +427,28 @@ class App {
         }
         console.log('Case Loaded:', jsonData.caseName);
 
-        // Cache the full envelope so Tab 2 (U-Basis Timeline) can
-        // re-render on demand without re-fetching the case JSON. Reset
-        // any open TimelinePanel so a stale card row isn't shown for a
-        // case the user no longer has selected.
-        this.currentCaseData = jsonData;
+        // Case change → dispose any open Tab 2 / Tab 3 panels so they
+        // don't keep stale state alive, and snap back to Tab 1 so the
+        // reviewer sees a fresh main viewport first.
         if (this.timelinePanel) {
-            this.timelinePanel.update(jsonData);
+            this.timelinePanel.dispose();
+            this.timelinePanel = null;
         }
+        if (this.couplingPanel) {
+            this.couplingPanel.dispose();
+            this.couplingPanel = null;
+        }
+        if (this.ui && this.ui.auditPanel) {
+            this.ui.auditPanel.dispose();
+            this.ui.auditPanel = null;
+        }
+        if (this.activeTab !== 'scene') {
+            this._switchTab('scene');
+        }
+
+        // Cache the full envelope so Tab 2 (U-Basis Timeline) can
+        // re-render on demand without re-fetching the case JSON.
+        this.currentCaseData = jsonData;
 
         document.getElementById('case-title').innerText = jsonData.caseName || jsonData.name || 'Untitled Case';
 
@@ -466,6 +581,15 @@ class App {
         const { surfaceLabels, curveLabels, auditLayers } =
             this.viewer.loadMesh(geometry, markers, nurbs, audit, extras);
 
+        // Extract the persistent skeleton (Profiles + Spine + Guides) so
+        // Tab 2 (coupling) and Tab 3 (timeline) can share a stable
+        // reference without re-parsing the NURBS payload.
+        this.couplingSceneGroup = this.viewer.getPersistentSkeletonGroup();
+
+        // loadMesh built a fresh mesh (visible=true by default); re-apply
+        // Tab 2's surface-hide so a case change while on Tab 2 stays clean.
+        if (this.activeTab === 'coupling') this.viewer.hideSurfaces();
+
         // Stage-1 (Profile Coupling) debug overlays — populate the
         // three Groups (seam markers / tangent arrows / ruling lines)
         // from case.debug.stage1_coupling when present. The renderer
@@ -474,8 +598,12 @@ class App {
         // Reset Stage-1 + Stage-2 checkboxes on every case change so a
         // reviewer can't be left looking at seam markers from a
         // previous case that the current case doesn't actually carry.
+        // Stage 1 toggles now live on Tab 2's coupling panel; Stage 2
+        // toggles stay on Tab 1's panel.
         if (this.ui) {
-            if (typeof this.ui.resetStage1Toggles === 'function') this.ui.resetStage1Toggles();
+            if (this.couplingPanel && typeof this.couplingPanel.resetStage1Toggles === 'function') {
+                this.couplingPanel.resetStage1Toggles();
+            }
             if (typeof this.ui.resetStage2Toggles === 'function') this.ui.resetStage2Toggles();
         }
 
@@ -490,9 +618,14 @@ class App {
             this.ui.updateCurveToggles(curveLabels, (label, visible) => {
                 this.viewer.setCurveVisibility(label, visible);
             });
-            this.ui.updateAuditPanel(auditLayers, audit, (layerKey, visible) => {
-                this.viewer.setAuditLayer(layerKey, visible);
-            });
+            this.currentAudit = audit;
+            this.currentAuditLayers = auditLayers;
+            // AuditPanel is now built lazily inside _ensureCouplingPanel
+            // (Tab 2 only), so it follows the tab's container visibility
+            // rather than floating on document.body across all tabs.
+            if (this.couplingPanel) {
+                this.couplingPanel.refresh(this.currentCaseData);
+            }
             // Intermediate Geometry (v-samples / v-sections / proxied-guides):
             // only wire when the case actually carries the corresponding
             // data. When absent the folder's checkbox stays inert (no-op

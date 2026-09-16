@@ -6,9 +6,14 @@ export class UIController {
         this.callbacks = callbacks;
         this.mode = callbacks.mode || 'directory';
 
+        // Tweakpane defaults to document.body; explicit #app container keeps
+        // it visible only when the 3D Scene tab is active.
+        const tab1Container = (typeof document !== 'undefined')
+            ? document.getElementById('app') : null;
         this.pane = new Pane({
             title: 'Geometry Studio',
             expanded: true,
+            container: tab1Container,
         });
 
         // Profile picker only makes sense in directory mode.
@@ -137,62 +142,32 @@ export class UIController {
         this.stage0VisualsFolder.addBinding(this.params, 'color', { label: 'Mesh Color' })
             .on('change', (ev) => callbacks.onColorChange(ev.value));
 
-        // Stage 1: Profile Coupling. Three overlays driven by
-        // case.debug.stage1_coupling: seam markers, tangent arrows,
-        // ruling lines. Defaults OFF; main.js wires the toggles to the
-        // Viewer3D groups built in setCouplingDebug().
+        // Stage 1: Profile Coupling. The seam-marker / tangent-arrow /
+        // ruling-line toggles have moved to the dedicated Tab 2 side
+        // panel (see createCouplingPanel). Tab 1 keeps the folder as a
+        // breadcrumb so the stage numbering still reads top-down.
         this.stage1Folder = this.pane.addFolder({
-            title: 'Stage 1: Profile Coupling',
+            title: 'Stage 1: Profile Coupling (see Tab 2)',
             expanded: false,
         });
-        this.stage1Params = {
-            showSeamMarkers: false,
-            showTangentArrows: false,
-            showRulingLines: false,
-        };
-        this.stage1Folder.addBinding(this.stage1Params, 'showSeamMarkers', {
-            label: 'Seam Markers'
-        }).on('change', (ev) => {
-            const cb = callbacks.onStage1Toggle || (() => {});
-            cb('seam_markers', ev.value);
-        });
-        this.stage1Folder.addBinding(this.stage1Params, 'showTangentArrows', {
-            label: 'Tangent Arrows'
-        }).on('change', (ev) => {
-            const cb = callbacks.onStage1Toggle || (() => {});
-            cb('tangent_arrows', ev.value);
-        });
-        this.stage1Folder.addBinding(this.stage1Params, 'showRulingLines', {
-            label: 'Ruling Lines'
-        }).on('change', (ev) => {
-            const cb = callbacks.onStage1Toggle || (() => {});
-            cb('ruling_lines', ev.value);
-        });
+        this.stage1Params = null;
 
         // Stage 2: Universal Basis U. Global knot markers are a future
         // feature — the toggle stays inert until setGlobalKnotsVisibility
-        // lands on Viewer3D. "Show Basis Timeline" is a cross-tab signal
-        // dispatched by main.js (it switches the workspace to Tab 2 when
-        // the user ticks this box).
+        // lands on Viewer3D. The "Open Basis Timeline" cross-link has
+        // been retired now that Tab 3 is a real workspace tab.
         this.stage2Folder = this.pane.addFolder({
             title: 'Stage 2: Universal Basis U',
             expanded: false,
         });
         this.stage2Params = {
             showGlobalKnots: false,
-            showBasisTimelineSteps: false,
         };
         this.stage2Folder.addBinding(this.stage2Params, 'showGlobalKnots', {
             label: 'Global Knots (stub)'
         }).on('change', (ev) => {
             const cb = callbacks.onStage2Toggle || (() => {});
             cb('global_knots', ev.value);
-        });
-        this.stage2Folder.addBinding(this.stage2Params, 'showBasisTimelineSteps', {
-            label: 'Open Basis Timeline →',
-        }).on('change', (ev) => {
-            const cb = callbacks.onStage2Toggle || (() => {});
-            cb('basis_timeline_steps', ev.value);
         });
 
         // Stage 3: Theoretical Manifold. Placeholder for the
@@ -308,27 +283,157 @@ export class UIController {
     }
 
     /**
-     * Reset Stage-1 toggles to OFF and refresh. Called by main.js
-     * whenever a new case loads so the reviewer can't be left looking
-     * at seam markers from a previous case that aren't in the current
-     * one.
-     */
-    resetStage1Toggles() {
-        if (!this.stage1Params) return;
-        this.stage1Params.showSeamMarkers = false;
-        this.stage1Params.showTangentArrows = false;
-        this.stage1Params.showRulingLines = false;
-        if (this.pane) this.pane.refresh();
-    }
-
-    /**
-     * Reset Stage-2 toggles. Same rationale as resetStage1Toggles.
+     * Reset Stage-2 toggles. Stage 1 toggles now live on the Tab 2
+     * coupling panel and are reset via couplingPanel.resetStage1Toggles().
      */
     resetStage2Toggles() {
         if (!this.stage2Params) return;
         this.stage2Params.showGlobalKnots = false;
-        this.stage2Params.showBasisTimelineSteps = false;
         if (this.pane) this.pane.refresh();
+    }
+
+    /**
+     * Build (lazily) the dedicated Tab 2 side panel: a separate
+     * Tweakpane instance mounted inside #coupling-container (NOT the
+     * main #app pane), with Stage 1 overlay toggles and a per-profile
+     * diagnostics table. The returned object exposes refresh(caseData),
+     * dispose() and resetStage1Toggles() so main.js can drive it from
+     * outside.
+     *
+     * The diagnostics table reads the optional `is_closed`,
+     * `phase_shift`, and `is_flipped` fields off each seam entry —
+     * these are optional on the producer side, so missing values render
+     * as '—' rather than throwing.
+     */
+    createCouplingPanel(container, callbacks) {
+        if (!container) return null;
+        container.innerHTML = '';
+        const layout = document.createElement('div');
+        layout.style.display = 'flex';
+        layout.style.flexDirection = 'row';
+        layout.style.width = '100%';
+        layout.style.height = '100%';
+        const viewport = document.createElement('div');
+        viewport.id = 'coupling-viewport';
+        viewport.style.flex = '1 1 auto';
+        viewport.style.position = 'relative';
+        viewport.style.minWidth = '0';
+        layout.appendChild(viewport);
+        const sidePanelRoot = document.createElement('div');
+        sidePanelRoot.id = 'coupling-side-panel';
+        sidePanelRoot.style.flex = '0 0 320px';
+        sidePanelRoot.style.maxWidth = '320px';
+        sidePanelRoot.style.height = '100%';
+        sidePanelRoot.style.background = 'rgba(255,255,255,0.85)';
+        sidePanelRoot.style.backdropFilter = 'blur(10px)';
+        sidePanelRoot.style.borderLeft = '1px solid #e0e0e0';
+        sidePanelRoot.style.boxSizing = 'border-box';
+        sidePanelRoot.style.overflowY = 'auto';
+        layout.appendChild(sidePanelRoot);
+        container.appendChild(layout);
+
+        const sidePane = new Pane({
+            container: sidePanelRoot,
+            title: 'Profile Coupling (Tab 2)',
+            expanded: true,
+        });
+        const params = {
+            showSeamMarkers: false,
+            showTangentArrows: false,
+            showRulingLines: false,
+        };
+        const stage1Folder = sidePane.addFolder({
+            title: 'Stage 1 Overlays',
+            expanded: true,
+        });
+        stage1Folder.addBinding(params, 'showSeamMarkers', { label: 'Seam Markers' })
+            .on('change', (ev) => callbacks.onSeamMarkersToggle && callbacks.onSeamMarkersToggle(ev.value));
+        stage1Folder.addBinding(params, 'showTangentArrows', { label: 'Tangent Arrows' })
+            .on('change', (ev) => callbacks.onTangentArrowsToggle && callbacks.onTangentArrowsToggle(ev.value));
+        stage1Folder.addBinding(params, 'showRulingLines', { label: 'Ruling Lines' })
+            .on('change', (ev) => callbacks.onRulingLinesToggle && callbacks.onRulingLinesToggle(ev.value));
+
+        const diagFolder = sidePane.addFolder({
+            title: 'Diagnostics (per profile)',
+            expanded: true,
+        });
+        const diagBody = document.createElement('div');
+        diagBody.style.fontFamily = 'monospace';
+        diagBody.style.fontSize = '11px';
+        diagBody.style.lineHeight = '1.5';
+        diagBody.style.padding = '4px 6px';
+        diagBody.style.color = '#333';
+        diagFolder.element.appendChild(diagBody);
+
+        const renderTable = (caseData) => {
+            diagBody.innerHTML = '';
+            const seams = (caseData && caseData.debug
+                && caseData.debug.stage1_coupling
+                && Array.isArray(caseData.debug.stage1_coupling.seams))
+                ? caseData.debug.stage1_coupling.seams
+                : [];
+            if (seams.length === 0) {
+                diagBody.innerHTML = '<div style="color:#888;">No stage1_coupling data for this case.</div>';
+                return;
+            }
+            const header = document.createElement('div');
+            header.style.display = 'grid';
+            header.style.gridTemplateColumns = '60px 70px 80px 70px';
+            header.style.gap = '4px';
+            header.style.fontWeight = '600';
+            header.style.borderBottom = '1px solid #ccc';
+            header.style.paddingBottom = '4px';
+            header.style.marginBottom = '4px';
+            header.innerHTML = '<span>profile</span><span>closed</span><span>phase°</span><span>flipped</span>';
+            diagBody.appendChild(header);
+            seams.forEach((seam) => {
+                const row = document.createElement('div');
+                row.style.display = 'grid';
+                row.style.gridTemplateColumns = '60px 70px 80px 70px';
+                row.style.gap = '4px';
+                row.style.borderBottom = '1px dashed #eee';
+                row.style.padding = '2px 0';
+                const idx = (typeof seam.profile_index === 'number') ? seam.profile_index : '?';
+                const closed = (typeof seam.is_closed === 'boolean')
+                    ? (seam.is_closed ? 'yes' : 'no')
+                    : '—';
+                let phase = '—';
+                if (typeof seam.phase_shift === 'number' && !isNaN(seam.phase_shift)) {
+                    phase = (seam.phase_shift * 180 / Math.PI).toFixed(1);
+                }
+                const flipped = (typeof seam.is_flipped === 'boolean')
+                    ? (seam.is_flipped ? 'YES' : 'no')
+                    : '—';
+                const flippedColor = (seam.is_flipped === true) ? '#d32f2f' : '#333';
+                row.innerHTML = `
+                    <span>${idx}</span>
+                    <span>${closed}</span>
+                    <span>${phase}</span>
+                    <span style="color:${flippedColor};">${flipped}</span>
+                `;
+                diagBody.appendChild(row);
+            });
+        };
+
+        const api = {
+            pane: sidePane,
+            viewportEl: viewport,
+            params,
+            refresh(caseData) {
+                renderTable(caseData);
+            },
+            resetStage1Toggles() {
+                params.showSeamMarkers = false;
+                params.showTangentArrows = false;
+                params.showRulingLines = false;
+                sidePane.refresh();
+            },
+            dispose() {
+                if (sidePane) sidePane.dispose();
+                if (container) container.innerHTML = '';
+            },
+        };
+        return api;
     }
 
     /**
@@ -571,11 +676,12 @@ export class UIController {
      * "v1.0 case — no audit data" placeholder so the reviewer knows
      * the absence is meaningful (older producer), not a bug.
      */
-    updateAuditPanel(layerKeys, audit, onToggleLayer) {
+    updateAuditPanel(layerKeys, audit, onToggleLayer, container) {
         if (this.auditPanel) this.auditPanel.dispose();
         this.auditPanel = new AuditPanel({
             audit,
             onToggleLayer: (layerKey, visible) => onToggleLayer(layerKey, visible),
+            container: container || undefined,
         });
     }
 
