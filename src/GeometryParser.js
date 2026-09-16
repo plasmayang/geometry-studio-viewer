@@ -103,13 +103,13 @@ export class GeometryParser {
         const stage1Coupling = this._parseStage1Coupling(dbg.stage1_coupling);
         const stage2Timeline = this._parseStage2Timeline(dbg.stage2_basis_u_timeline);
         const stage3Frames = this._parseStage3SpineFrames(dbg.stage3_spine_frames);
-        // If all sub-fields are missing, treat the whole debug envelope
-        // as absent — keeps the legacy "no debug data" UX clean.
-        if (!stage1Coupling && !stage2Timeline && !stage3Frames) return null;
+        const stage4Manifold = this._parseStage4TheoreticalManifold(dbg.stage4_theoretical_manifold);
+        if (!stage1Coupling && !stage2Timeline && !stage3Frames && !stage4Manifold) return null;
         return {
             stage1_coupling: stage1Coupling,
             stage2_basis_u_timeline: stage2Timeline,
             stage3_spine_frames: stage3Frames,
+            stage4_theoretical_manifold: stage4Manifold,
         };
     }
 
@@ -193,6 +193,75 @@ export class GeometryParser {
         }
         if (steps.length === 0) return null;
         return steps;
+    }
+
+    /**
+     * Stage-4 (Theoretical Manifold) diagnostic envelope:
+     *   {
+     *     surface: {
+     *       degree_u: number,
+     *       degree_v: number,
+     *       num_cps_u: number,
+     *       num_cps_v: number,
+     *       knots_u: number[],
+     *       knots_v: number[],
+     *       control_points: [{x, y, z, w}, ...]   // num_cps_u * num_cps_v
+     *     },
+     *     split_u_params: number[],
+     *     split_v_params: number[]
+     *   }
+     *
+     * Missing / malformed fields are silently dropped. Returns null when
+     * the envelope is absent or carries no usable surface data.
+     */
+    static _parseStage4TheoreticalManifold(raw) {
+        if (!raw || typeof raw !== 'object') return null;
+        const s = raw.surface;
+        if (!s || typeof s !== 'object') return null;
+        const degreeU = (typeof s.degree_u === 'number') ? s.degree_u : null;
+        const degreeV = (typeof s.degree_v === 'number') ? s.degree_v : null;
+        const numCpsU = (typeof s.num_cps_u === 'number') ? s.num_cps_u : null;
+        const numCpsV = (typeof s.num_cps_v === 'number') ? s.num_cps_v : null;
+        const knotsU = Array.isArray(s.knots_u) ? Array.from(s.knots_u) : null;
+        const knotsV = Array.isArray(s.knots_v) ? Array.from(s.knots_v) : null;
+        const rawCps = Array.isArray(s.control_points) ? s.control_points : null;
+        if (degreeU === null || degreeV === null
+            || numCpsU === null || numCpsV === null
+            || knotsU === null || knotsV === null
+            || rawCps === null) return null;
+        if (knotsU.length === 0 || knotsV.length === 0 || rawCps.length === 0) return null;
+        const expectedTotal = numCpsU * numCpsV;
+        if (rawCps.length < expectedTotal) return null;
+        const cps = [];
+        for (let i = 0; i < expectedTotal; i++) {
+            const cp = rawCps[i];
+            if (!cp || typeof cp !== 'object') return null;
+            const x = (typeof cp.x === 'number') ? cp.x : NaN;
+            const y = (typeof cp.y === 'number') ? cp.y : NaN;
+            const z = (typeof cp.z === 'number') ? cp.z : NaN;
+            const w = (typeof cp.w === 'number') ? cp.w : 1.0;
+            if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null;
+            cps.push({ x, y, z, w });
+        }
+        const splitUParams = Array.isArray(raw.split_u_params)
+            ? raw.split_u_params.filter((v) => Number.isFinite(v))
+            : [];
+        const splitVParams = Array.isArray(raw.split_v_params)
+            ? raw.split_v_params.filter((v) => Number.isFinite(v))
+            : [];
+        return {
+            surface: {
+                degree_u: degreeU,
+                degree_v: degreeV,
+                num_cps_u: numCpsU,
+                num_cps_v: numCpsV,
+                knots_u: knotsU,
+                knots_v: knotsV,
+                control_points: cps,
+            },
+            split_u_params: splitUParams,
+            split_v_params: splitVParams,
+        };
     }
 
     /**

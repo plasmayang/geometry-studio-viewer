@@ -1,0 +1,105 @@
+/* Tab 5 (Manifold vs Patches): viewport + side panel. Sits below the
+   tab strip and fills the remaining viewport height. Hidden when any
+   other tab is active. The ManifoldPatchesPanel manages its own
+   internal layout (.manifold-patches-panel) so the container only
+   needs to fill the area below the tab strip — same cascade-override
+   pattern as #coupling-container, #timeline-container, and
+   #spine-frames-container. */
+#manifold-patches-container {
+    display: none;
+    width: 100vw;
+    height: calc(100vh - 48px);
+    overflow: hidden;
+    background: #f5f7fa;
+    box-sizing: border-box;
+    /* duplicate display: when JS sets style.display='flex' the inline
+       rule is removed and the cascade falls through to display: flex
+       below. Mirrors #coupling-container / #timeline-container /
+       #spine-frames-container. */
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+}
+
+.manifold-patches-panel {
+    width: 100%;
+    height: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: row;
+    background: #f5f7fa;
+    box-sizing: border-box;
+}
+
+.manifold-patches-viewport {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    position: relative;
+    background: #fafafa;
+}
+
+.manifold-patches-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    background: #f5f7fa;
+    cursor: grab;
+}
+.manifold-patches-canvas:active { cursor: grabbing; }
+
+.manifold-patches-side-panel {
+    flex: 0 0 320px;
+    max-width: 320px;
+    width: 320px;
+    overflow-y: auto;
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(10px);
+    border-left: 1px solid #e0e0e0;
+    box-sizing: border-box;
+}
+
+/* Empty-state message when case.debug.stage4_theoretical_manifold is
+   missing — centered horizontally and vertically inside the viewport
+   (overlay so it sits on top of whatever the canvas paints). */
+.manifold-patches-empty-state {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    color: #666;
+    pointer-events: none;
+    text-align: center;
+    padding: 0 24px;
+    line-height: 1.5;
+}
+
+/* Patch distinct-color chip list — one small swatch per industrial
+   patch. Used inside the side panel to label the N patch pieces. */
+.manifold-patches-patch-list {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    padding: 4px 6px;
+    max-height: 180px;
+    overflow-y: auto;
+    color: #333;
+}
+.manifold-patches-patch-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 4px;
+    border-radius: 3px;
+}
+.manifold-patches-patch-swatch {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    flex: 0 0 auto;
+}

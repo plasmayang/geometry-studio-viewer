@@ -605,6 +605,183 @@ export class UIController {
         return api;
     }
 
+    /**
+     * Build (lazily) the dedicated Tab 5 side panel: a Tweakpane
+     * instance mounted inside #manifold-patches-side-panel, with a
+     * blend slider, four layer checkboxes (cage / weights / seams /
+     * distinct), a read-only w_min / w_max monitor, and a per-patch
+     * color chip list. The returned object exposes refresh(caseData),
+     * dispose(), setBlend(t), toggleLayer(name, visible), and
+     * resetBlend() so main.js can drive it from outside.
+     */
+    createManifoldPatchesPanel(container, callbacks) {
+        if (!container) return null;
+        const sidePanelRoot = container.querySelector('#manifold-patches-side-panel');
+        if (!sidePanelRoot) return null;
+        if (sidePanelRoot._tpInstance) {
+            try { sidePanelRoot._tpInstance.dispose(); } catch (e) { /* no-op */ }
+            sidePanelRoot._tpInstance = null;
+        }
+        while (sidePanelRoot.firstChild) {
+            sidePanelRoot.removeChild(sidePanelRoot.firstChild);
+        }
+
+        const sidePane = new Pane({
+            container: sidePanelRoot,
+            title: 'Manifold vs Patches (Tab 5)',
+            expanded: true,
+        });
+        sidePanelRoot._tpInstance = sidePane;
+
+        const params = {
+            blend: 0.5,
+            showCage: true,
+            showWeights: false,
+            showSeams: true,
+            showDistinct: true,
+        };
+        const weightMonitor = { w_min: 0, w_max: 1 };
+
+        const blendFolder = sidePane.addFolder({
+            title: 'Blend',
+            expanded: true,
+        });
+        blendFolder.addBinding(params, 'blend', {
+            label: '0%=Manifold → 100%=Patches',
+            min: 0,
+            max: 1,
+            step: 0.01,
+        }).on('change', (ev) => {
+            if (callbacks && typeof callbacks.onBlendChange === 'function') {
+                callbacks.onBlendChange(ev.value);
+            }
+        });
+
+        const layersFolder = sidePane.addFolder({
+            title: 'Layers',
+            expanded: true,
+        });
+        layersFolder.addBinding(params, 'showCage', { label: 'Control Cage' })
+            .on('change', (ev) => {
+                if (callbacks && typeof callbacks.onLayerToggle === 'function') {
+                    callbacks.onLayerToggle('cage', ev.value);
+                }
+            });
+        layersFolder.addBinding(params, 'showWeights', { label: 'Weights Heatmap' })
+            .on('change', (ev) => {
+                if (callbacks && typeof callbacks.onLayerToggle === 'function') {
+                    callbacks.onLayerToggle('weights', ev.value);
+                }
+            });
+        layersFolder.addBinding(params, 'showSeams', { label: 'Split Seams' })
+            .on('change', (ev) => {
+                if (callbacks && typeof callbacks.onLayerToggle === 'function') {
+                    callbacks.onLayerToggle('seams', ev.value);
+                }
+            });
+        layersFolder.addBinding(params, 'showDistinct', { label: 'Patch Distinct Colors' })
+            .on('change', (ev) => {
+                if (callbacks && typeof callbacks.onLayerToggle === 'function') {
+                    callbacks.onLayerToggle('distinct', ev.value);
+                }
+            });
+
+        const monitorFolder = sidePane.addFolder({
+            title: 'Weights (theoretical surface)',
+            expanded: true,
+        });
+        monitorFolder.addBinding(weightMonitor, 'w_min', {
+            label: 'w_min', readonly: true, format: (v) => v.toFixed(4),
+        });
+        monitorFolder.addBinding(weightMonitor, 'w_max', {
+            label: 'w_max', readonly: true, format: (v) => v.toFixed(4),
+        });
+
+        const patchListFolder = sidePane.addFolder({
+            title: 'Patches (distinct colors)',
+            expanded: true,
+        });
+        const patchListBody = document.createElement('div');
+        patchListBody.className = 'manifold-patches-patch-list';
+        patchListFolder.element.appendChild(patchListBody);
+
+        const renderPatchList = (caseData) => {
+            patchListBody.innerHTML = '';
+            const patches = (caseData && caseData._manifoldPatchesRef
+                && Array.isArray(caseData._manifoldPatchesRef)) ? caseData._manifoldPatchesRef : [];
+            if (patches.length === 0) {
+                const empty = document.createElement('div');
+                empty.style.color = '#888';
+                empty.textContent = 'No post-split patches in case.nurbs.surfaces[]';
+                patchListBody.appendChild(empty);
+                return;
+            }
+            patches.forEach((p, i) => {
+                const row = document.createElement('div');
+                row.className = 'manifold-patches-patch-row';
+                const swatch = document.createElement('span');
+                swatch.className = 'manifold-patches-patch-swatch';
+                const palette = [0xffaa00, 0x00aaff, 0x00ff88, 0xff5500, 0xaa00ff, 0x00ffaa,
+                    0xff66cc, 0x66ccff, 0xccff66, 0xff3366, 0x9966ff, 0x33cc99];
+                const hex = '#' + palette[i % palette.length].toString(16).padStart(6, '0');
+                swatch.style.backgroundColor = hex;
+                const label = document.createElement('span');
+                label.textContent = p.label || `patch_${i}`;
+                row.appendChild(swatch);
+                row.appendChild(label);
+                patchListBody.appendChild(row);
+            });
+        };
+
+        const api = {
+            pane: sidePane,
+            params,
+            refresh(caseData) {
+                const stats = (caseData && caseData._manifoldWeightsRef) || null;
+                if (stats) {
+                    weightMonitor.w_min = stats.w_min;
+                    weightMonitor.w_max = stats.w_max;
+                } else {
+                    weightMonitor.w_min = 0;
+                    weightMonitor.w_max = 1;
+                }
+                sidePane.refresh();
+                renderPatchList(caseData);
+            },
+            setBlend(t) {
+                const v = (typeof t === 'number') ? Math.max(0, Math.min(1, t)) : 0.5;
+                params.blend = v;
+                sidePane.refresh();
+            },
+            toggleLayer(name, visible) {
+                if (name === 'cage') params.showCage = !!visible;
+                else if (name === 'weights') params.showWeights = !!visible;
+                else if (name === 'seams') params.showSeams = !!visible;
+                else if (name === 'distinct') params.showDistinct = !!visible;
+                sidePane.refresh();
+            },
+            resetBlend() {
+                params.blend = 0.5;
+                if (callbacks && typeof callbacks.onBlendChange === 'function') {
+                    callbacks.onBlendChange(0.5);
+                }
+                sidePane.refresh();
+            },
+            dispose() {
+                if (sidePane) {
+                    try { sidePane.dispose(); } catch (e) { /* no-op */ }
+                }
+                if (sidePanelRoot._tpInstance === sidePane) {
+                    sidePanelRoot._tpInstance = null;
+                }
+                while (sidePanelRoot.firstChild) {
+                    sidePanelRoot.removeChild(sidePanelRoot.firstChild);
+                }
+            },
+        };
+        return api;
+    }
+
     updateSurfaceToggles(surfaces, onSurfaceToggle) {
         // Cache the latest surface list so the subsequent
         // updateCurveToggles call can build the complete bucket
