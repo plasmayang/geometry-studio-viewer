@@ -449,6 +449,162 @@ export class UIController {
         }
     }
 
+    /**
+     * Build (lazily) the dedicated Tab 4 side panel: a Tweakpane
+     * instance mounted inside the Tab 4 viewport (NOT the main #app
+     * pane), with layer toggles, a plane-scale slider, and a station
+     * list. The returned object exposes refresh(caseData), dispose(),
+     * setStationHighlight(idx) and resetStationHighlight() so
+     * main.js can drive it from outside.
+     */
+    createSpineFramesPanel(container, callbacks) {
+        if (!container) return null;
+        const sidePanelRoot = container.querySelector('#spine-frames-side-panel');
+        if (!sidePanelRoot) return null;
+        // Keep the panel pane scoped to its own side-panel root; any
+        // previous Tweakpane instance on this container is disposed so
+        // callers can re-enter Tab 4 safely.
+        if (sidePanelRoot._tpInstance) {
+            try { sidePanelRoot._tpInstance.dispose(); } catch (e) { /* no-op */ }
+            sidePanelRoot._tpInstance = null;
+        }
+        while (sidePanelRoot.firstChild) {
+            sidePanelRoot.removeChild(sidePanelRoot.firstChild);
+        }
+
+        const sidePane = new Pane({
+            container: sidePanelRoot,
+            title: 'Spine & Frames (Tab 4)',
+            expanded: true,
+        });
+        sidePanelRoot._tpInstance = sidePane;
+
+        const params = {
+            showFrames: true,
+            showPlanes: true,
+            showRibbon: true,
+            showStations: true,
+            planeScale: 1.0,
+        };
+
+        const layersFolder = sidePane.addFolder({
+            title: 'Layers',
+            expanded: true,
+        });
+        layersFolder.addBinding(params, 'showFrames', { label: 'Frames (T/N/B)' })
+            .on('change', (ev) => callbacks.onLayerToggle && callbacks.onLayerToggle('frames', ev.value));
+        layersFolder.addBinding(params, 'showPlanes', { label: 'Sampling Planes' })
+            .on('change', (ev) => callbacks.onLayerToggle && callbacks.onLayerToggle('planes', ev.value));
+        layersFolder.addBinding(params, 'showRibbon', { label: 'Twist Ribbon' })
+            .on('change', (ev) => callbacks.onLayerToggle && callbacks.onLayerToggle('ribbon', ev.value));
+        layersFolder.addBinding(params, 'showStations', { label: 'Station Spheres' })
+            .on('change', (ev) => callbacks.onLayerToggle && callbacks.onLayerToggle('stations', ev.value));
+
+        const scaleFolder = sidePane.addFolder({
+            title: 'Plane Scale',
+            expanded: true,
+        });
+        scaleFolder.addBinding(params, 'planeScale', {
+            label: 'Scale',
+            min: 0.2,
+            max: 5.0,
+            step: 0.05,
+        }).on('change', (ev) => callbacks.onPlaneScaleChange && callbacks.onPlaneScaleChange(ev.value));
+
+        const stationFolder = sidePane.addFolder({
+            title: 'Stations',
+            expanded: true,
+        });
+        const stationBody = document.createElement('div');
+        stationBody.className = 'spine-frames-station-list';
+        stationBody.style.fontFamily = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace';
+        stationBody.style.fontSize = '11px';
+        stationBody.style.lineHeight = '1.5';
+        stationBody.style.padding = '4px 6px';
+        stationBody.style.maxHeight = '240px';
+        stationBody.style.overflowY = 'auto';
+        stationBody.style.color = '#333';
+        stationFolder.element.appendChild(stationBody);
+
+        let stationEntries = [];
+        let activeStationIdx = null;
+        const onStationClick = (callbacks && callbacks.onStationClick) || (() => {});
+
+        const renderStations = (caseData) => {
+            stationBody.innerHTML = '';
+            stationEntries = [];
+            const dbg = (caseData && caseData.debug && caseData.debug.stage3_spine_frames) || null;
+            const frames = (dbg && Array.isArray(dbg.frames)) ? dbg.frames : [];
+            if (frames.length === 0) {
+                const empty = document.createElement('div');
+                empty.style.color = '#888';
+                empty.textContent = 'No stage3_spine_frames for this case.';
+                stationBody.appendChild(empty);
+                activeStationIdx = null;
+                return;
+            }
+            frames.forEach((f, idx) => {
+                const row = document.createElement('div');
+                row.className = 'spine-frames-station-row';
+                row.style.display = 'flex';
+                row.style.justifyContent = 'space-between';
+                row.style.alignItems = 'center';
+                row.style.padding = '3px 6px';
+                row.style.marginBottom = '2px';
+                row.style.borderRadius = '3px';
+                row.style.cursor = 'pointer';
+                row.style.border = '1px solid #e0e0e0';
+                row.style.background = '#fafafa';
+                const v = (typeof f.v === 'number') ? f.v.toFixed(3) : '?';
+                row.innerHTML = `<span>Station ${idx}</span><span style="color:#555;">v=${v}</span>`;
+                row.addEventListener('click', () => {
+                    setActiveStation(idx);
+                    onStationClick(idx);
+                });
+                stationBody.appendChild(row);
+                stationEntries.push(row);
+            });
+        };
+
+        const setActiveStation = (idx) => {
+            if (idx === null || idx === undefined) {
+                activeStationIdx = null;
+                stationEntries.forEach((el) => el.classList.remove('active'));
+                return;
+            }
+            activeStationIdx = idx;
+            stationEntries.forEach((el, k) => {
+                el.classList.toggle('active', k === idx);
+            });
+        };
+
+        const api = {
+            pane: sidePane,
+            params,
+            refresh(caseData) {
+                renderStations(caseData);
+            },
+            setStationHighlight(idx) {
+                setActiveStation(idx);
+            },
+            resetStationHighlight() {
+                setActiveStation(null);
+            },
+            dispose() {
+                if (sidePane) {
+                    try { sidePane.dispose(); } catch (e) { /* no-op */ }
+                }
+                if (sidePanelRoot._tpInstance === sidePane) {
+                    sidePanelRoot._tpInstance = null;
+                }
+                while (sidePanelRoot.firstChild) {
+                    sidePanelRoot.removeChild(sidePanelRoot.firstChild);
+                }
+            },
+        };
+        return api;
+    }
+
     updateSurfaceToggles(surfaces, onSurfaceToggle) {
         // Cache the latest surface list so the subsequent
         // updateCurveToggles call can build the complete bucket

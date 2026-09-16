@@ -1,0 +1,92 @@
+/* Tab 4 (Spine & Frames): viewport + side panel. Sits below the tab
+   strip and fills the remaining viewport height. Hidden when Tab 1,
+   2, or 3 is active. The SpineFramesPanel manages its own internal
+   layout (.spine-frames-panel) so the container only needs to fill
+   the area below the tab strip — same cascade-override pattern as
+   #coupling-container and #timeline-container. */
+#spine-frames-container {
+    display: none;
+    width: 100vw;
+    height: calc(100vh - 48px);
+    overflow: hidden;
+    background: #f5f7fa;
+    box-sizing: border-box;
+    /* duplicate display: when JS sets style.display='flex' the inline
+       rule is removed and the cascade falls through to display: flex
+       below. Mirrors #coupling-container / #timeline-container. */
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+}
+
+.spine-frames-panel {
+    width: 100%;
+    height: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: row;
+    background: #f5f7fa;
+    box-sizing: border-box;
+}
+
+.spine-frames-viewport {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    position: relative;
+    background: #fafafa;
+}
+
+.spine-frames-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    background: #f5f7fa;
+    cursor: grab;
+}
+.spine-frames-canvas:active { cursor: grabbing; }
+
+.spine-frames-side-panel {
+    flex: 0 0 320px;
+    max-width: 320px;
+    width: 320px;
+    overflow-y: auto;
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(10px);
+    border-left: 1px solid #e0e0e0;
+    box-sizing: border-box;
+}
+
+/* Empty-state message when case.debug.stage3_spine_frames is missing
+   — centered horizontally and vertically inside the viewport (overlay
+   so it sits on top of whatever the canvas paints). */
+.spine-frames-empty-state {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    color: #666;
+    pointer-events: none;
+}
+
+/* Station list — small grid of clickable rows with the station index
+   + v-parameter. The active row gets the accent border + tinted
+   background (mirrors timeline-stepper-btn.active for consistency). */
+.spine-frames-station-row {
+    transition: border-color 0.15s, background 0.15s;
+}
+.spine-frames-station-row:hover {
+    border-color: #1976d2;
+    background: rgba(25, 118, 210, 0.05);
+}
+.spine-frames-station-row.active {
+    border-color: #1976d2;
+    border-width: 2px;
+    padding: 2px 5px;
+    color: #1976d2;
+    background: rgba(25, 118, 210, 0.1);
+    font-weight: 600;
+}

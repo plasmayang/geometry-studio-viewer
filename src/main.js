@@ -3,7 +3,9 @@ import { GeometryParser } from './GeometryParser.js';
 import { UIController } from './UIController.js';
 import { ProtocolSource } from './data-sources/ProtocolSource.js';
 import { TimelinePanel } from './TimelinePanel.js';
+import { SpineFramesPanel } from './SpineFramesPanel.js';
 import './timeline.css';
+import './spine-frames.css';
 
 // Runtime config injected at build time by vite.config.js. Vite's
 // `define` option replaces the bare identifier with the JSON string
@@ -45,11 +47,16 @@ class App {
         this.protocolSource = null;
         this.caseNameFilter = '';
         // 'scene' (Tab 1) | 'coupling' (Tab 2) | 'timeline' (Tab 3)
+        // | 'spine-frames' (Tab 4)
         this.activeTab = 'scene';
         // Tab-2 side-panel (Stage 1 toggles + diagnostics table)
         this.couplingPanel = null;
         // Tab-3 TimelinePanel (built lazily, recreated on case change)
         this.timelinePanel = null;
+        // Tab-4 SpineFramesPanel (built lazily, recreated on case change)
+        this.spineFramesPanel = null;
+        // Tab-4 side-panel (layer toggles + plane scale + station list)
+        this.spineFramesSidePanel = null;
         // Persistent skeleton (Profiles/Spine/Guides) shared by Tab 2 + Tab 3;
         // rebuilt only on case change, survives panel swaps.
         this.couplingSceneGroup = null;
@@ -96,7 +103,8 @@ class App {
     }
 
     _switchTab(name) {
-        if (name !== 'scene' && name !== 'coupling' && name !== 'timeline') return;
+        if (name !== 'scene' && name !== 'coupling' && name !== 'timeline'
+            && name !== 'spine-frames') return;
         this.activeTab = name;
         const tabs = document.querySelectorAll('.workspace-tab');
         tabs.forEach(t => {
@@ -105,12 +113,14 @@ class App {
         const sceneContainer = document.getElementById('app');
         const couplingContainer = document.getElementById('coupling-container');
         const timelineContainer = document.getElementById('timeline-container');
+        const spineFramesContainer = document.getElementById('spine-frames-container');
         const infoPanel = document.getElementById('info-panel');
         const showScene = (name === 'scene');
         const showCoupling = (name === 'coupling');
         const showTimeline = (name === 'timeline');
-        // Case-selector panel overlays the canvas on Tab 2/3; only keep it
-        // visible on the 3D Scene tab.
+        const showSpineFrames = (name === 'spine-frames');
+        // Case-selector panel overlays the canvas on Tab 2/3/4; only
+        // keep it visible on the 3D Scene tab.
         if (infoPanel) {
             infoPanel.style.display = showScene ? '' : 'none';
         }
@@ -122,6 +132,9 @@ class App {
         }
         if (timelineContainer) {
             timelineContainer.style.display = showTimeline ? 'flex' : 'none';
+        }
+        if (spineFramesContainer) {
+            spineFramesContainer.style.display = showSpineFrames ? 'flex' : 'none';
         }
 
         if (name === 'coupling') {
@@ -153,6 +166,18 @@ class App {
         } else if (this.timelinePanel) {
             this.timelinePanel.dispose();
             this.timelinePanel = null;
+        }
+
+        if (name === 'spine-frames') {
+            this._ensureSpineFramesPanel();
+            window.dispatchEvent(new Event('resize'));
+        } else if (this.spineFramesPanel) {
+            this.spineFramesPanel.dispose();
+            this.spineFramesPanel = null;
+            if (this.spineFramesSidePanel) {
+                this.spineFramesSidePanel.dispose();
+                this.spineFramesSidePanel = null;
+            }
         }
     }
 
@@ -232,6 +257,55 @@ class App {
             spineGroup: this.couplingSceneGroup,
             geometryParser: GeometryParser,
         });
+    }
+
+    _ensureSpineFramesPanel() {
+        const container = document.getElementById('spine-frames-container');
+        if (!container) return;
+        if (!this.spineFramesPanel) {
+            this.spineFramesPanel = new SpineFramesPanel(
+                container,
+                this.currentCaseData,
+                {
+                    skeletonGroup: this.couplingSceneGroup,
+                    geometryParser: GeometryParser,
+                }
+            );
+        } else {
+            this.spineFramesPanel.update(this.currentCaseData);
+        }
+        if (!this.spineFramesSidePanel && this.ui
+            && typeof this.ui.createSpineFramesPanel === 'function') {
+            this.spineFramesSidePanel = this.ui.createSpineFramesPanel(container, {
+                onLayerToggle: (name, visible) => {
+                    if (this.spineFramesPanel
+                        && typeof this.spineFramesPanel.toggleLayer === 'function') {
+                        this.spineFramesPanel.toggleLayer(name, visible);
+                    }
+                },
+                onPlaneScaleChange: (m) => {
+                    if (this.spineFramesPanel
+                        && typeof this.spineFramesPanel.setPlaneScale === 'function') {
+                        this.spineFramesPanel.setPlaneScale(m);
+                    }
+                },
+                onStationClick: (idx) => {
+                    if (this.spineFramesPanel
+                        && typeof this.spineFramesPanel.setStationHighlight === 'function') {
+                        this.spineFramesPanel.setStationHighlight(idx);
+                    }
+                },
+            });
+        }
+        if (this.spineFramesSidePanel && this.currentCaseData) {
+            this.spineFramesSidePanel.refresh(this.currentCaseData);
+        }
+        // Output surfaces (FreeBlend3D / AffineTransport / NominalManifold)
+        // are hidden on Tab 4 — the visualization focuses on the
+        // spine + RMF frame field rather than the lofted surfaces.
+        if (this.viewer && typeof this.viewer.hideSurfaces === 'function') {
+            this.viewer.hideSurfaces();
+        }
     }
 
     // ---- UI init (shared) -------------------------------------------------
@@ -427,12 +501,20 @@ class App {
         }
         console.log('Case Loaded:', jsonData.caseName);
 
-        // Case change → dispose any open Tab 2 / Tab 3 panels so they
+        // Case change → dispose any open Tab 2 / Tab 3 / Tab 4 panels so they
         // don't keep stale state alive, and snap back to Tab 1 so the
         // reviewer sees a fresh main viewport first.
         if (this.timelinePanel) {
             this.timelinePanel.dispose();
             this.timelinePanel = null;
+        }
+        if (this.spineFramesPanel) {
+            this.spineFramesPanel.dispose();
+            this.spineFramesPanel = null;
+        }
+        if (this.spineFramesSidePanel) {
+            this.spineFramesSidePanel.dispose();
+            this.spineFramesSidePanel = null;
         }
         if (this.couplingPanel) {
             this.couplingPanel.dispose();
@@ -587,8 +669,10 @@ class App {
         this.couplingSceneGroup = this.viewer.getPersistentSkeletonGroup();
 
         // loadMesh built a fresh mesh (visible=true by default); re-apply
-        // Tab 2's surface-hide so a case change while on Tab 2 stays clean.
+        // Tab 2 / Tab 4's surface-hide so a case change while on those
+        // tabs stays clean.
         if (this.activeTab === 'coupling') this.viewer.hideSurfaces();
+        else if (this.activeTab === 'spine-frames') this.viewer.hideSurfaces();
 
         // Stage-1 (Profile Coupling) debug overlays — populate the
         // three Groups (seam markers / tangent arrows / ruling lines)

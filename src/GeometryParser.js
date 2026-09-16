@@ -90,24 +90,26 @@ export class GeometryParser {
 
     /**
      * Parse the optional `case.debug` envelope carrying Stage-1
-     * (Profile Coupling) and Stage-2 (Universal Basis U) visualization
-     * data. Returns null when the field is absent (legacy envelopes)
-     * so callers can guard with a single null-check instead of digging
-     * through nested keys. The shape mirrors the schema Task B
-     * publishes; missing sub-fields default to null so each consumer
-     * can short-circuit independently.
+     * (Profile Coupling), Stage-2 (Universal Basis U) and Stage-3
+     * (Spine & Moving Frames) visualization data. Returns null when
+     * the field is absent (legacy envelopes) so callers can guard
+     * with a single null-check instead of digging through nested keys.
+     * Missing sub-fields default to null so each consumer can
+     * short-circuit independently.
      */
     static parseDebug(jsonData) {
         const dbg = jsonData && jsonData.debug;
         if (!dbg || typeof dbg !== 'object') return null;
         const stage1Coupling = this._parseStage1Coupling(dbg.stage1_coupling);
         const stage2Timeline = this._parseStage2Timeline(dbg.stage2_basis_u_timeline);
-        // If both sub-fields are missing, treat the whole debug envelope
+        const stage3Frames = this._parseStage3SpineFrames(dbg.stage3_spine_frames);
+        // If all sub-fields are missing, treat the whole debug envelope
         // as absent — keeps the legacy "no debug data" UX clean.
-        if (!stage1Coupling && !stage2Timeline) return null;
+        if (!stage1Coupling && !stage2Timeline && !stage3Frames) return null;
         return {
             stage1_coupling: stage1Coupling,
             stage2_basis_u_timeline: stage2Timeline,
+            stage3_spine_frames: stage3Frames,
         };
     }
 
@@ -191,6 +193,53 @@ export class GeometryParser {
         }
         if (steps.length === 0) return null;
         return steps;
+    }
+
+    /**
+     * Stage-3 (Spine & Moving Frames) diagnostic envelope:
+     *   {
+     *     knots_v: number[],            // raw knot vector (optional)
+     *     distinct_v_stations: number[], // deduped params (optional)
+     *     frames: [{
+     *       v: number,
+     *       origin:    [x, y, z],
+     *       tangent:   [tx, ty, tz],
+     *       normal:    [nx, ny, nz],
+     *       binormal:  [bx, by, bz]
+     *     }, ...]
+     *   }
+     *
+     * Frames missing any required field are silently skipped. Returns
+     * null when the envelope is absent or carries zero valid frames.
+     */
+    static _parseStage3SpineFrames(raw) {
+        if (!raw || typeof raw !== 'object') return null;
+        const knotsV = Array.isArray(raw.knots_v) ? Array.from(raw.knots_v) : [];
+        const distinctV = Array.isArray(raw.distinct_v_stations)
+            ? Array.from(raw.distinct_v_stations) : [];
+        const framesRaw = Array.isArray(raw.frames) ? raw.frames : [];
+        const frames = [];
+        for (const f of framesRaw) {
+            if (!f || typeof f !== 'object') continue;
+            const origin = Array.isArray(f.origin) && f.origin.length >= 3
+                ? [f.origin[0], f.origin[1], f.origin[2]] : null;
+            const tangent = Array.isArray(f.tangent) && f.tangent.length >= 3
+                ? [f.tangent[0], f.tangent[1], f.tangent[2]] : null;
+            const normal = Array.isArray(f.normal) && f.normal.length >= 3
+                ? [f.normal[0], f.normal[1], f.normal[2]] : null;
+            const binormal = Array.isArray(f.binormal) && f.binormal.length >= 3
+                ? [f.binormal[0], f.binormal[1], f.binormal[2]] : null;
+            if (!origin || !tangent || !normal || !binormal) continue;
+            if (![origin, tangent, normal, binormal].every(
+                (v) => Number.isFinite(v[0]) && Number.isFinite(v[1]) && Number.isFinite(v[2])
+            )) continue;
+            frames.push({
+                v: (typeof f.v === 'number') ? f.v : 0,
+                origin, tangent, normal, binormal,
+            });
+        }
+        if (frames.length === 0) return null;
+        return { knots_v: knotsV, distinct_v_stations: distinctV, frames };
     }
 
     /** spec 0002: top-level `moving_frame[]` (one per spine v-station). */
