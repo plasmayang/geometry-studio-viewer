@@ -1274,12 +1274,19 @@ export class Viewer3D {
         }
 
         // Tangent arrows: one ArrowHelper per seam.
+        // Producers may emit the tangent vector under either `tangent`
+        // (current gallery-output convention) or `tangent_vector`
+        // (legacy debug envelope) — accept both for backwards compat.
         for (const seam of seams) {
             if (!seam) continue;
             if (!Array.isArray(seam.start_point) || seam.start_point.length < 3) continue;
-            if (!Array.isArray(seam.tangent_vector) || seam.tangent_vector.length < 3) continue;
+            const tangentRaw = (Array.isArray(seam.tangent) && seam.tangent.length >= 3)
+                ? seam.tangent
+                : (Array.isArray(seam.tangent_vector) && seam.tangent_vector.length >= 3)
+                    ? seam.tangent_vector : null;
+            if (!tangentRaw) continue;
             const [x, y, z] = seam.start_point;
-            const [tx, ty, tz] = seam.tangent_vector;
+            const [tx, ty, tz] = tangentRaw;
             const tangent = new THREE.Vector3(tx, ty, tz);
             const len = tangent.length();
             if (len < 1e-9) continue;
