@@ -2,30 +2,35 @@
 // geometry-viewer workspace.
 //
 // Owns its own WebGLRenderer / Scene / PerspectiveCamera /
-// OrbitControls. Renders the pre-split theoretical NURBS manifold
-// alongside the post-split industrial patches with a blend slider,
-// control cage, weights heatmap, split-seam isoparm curves, and
-// per-patch distinct colors.
+// OrbitControls. Renders the three §3.2 result layers side by side,
+// each independently show/hide-able via its own Group:
+//   - NominalManifold  ← intermediate_products.s_norm_cp (synthesized
+//                        by GeometryParser.parseNurbs with
+//                        label 'NominalManifold').
+//   - FreeBlend3D      ← case.surfaces[] entry labelled 'FreeBlend3D'.
+//   - AffineTransport  ← case.surfaces[] entry labelled 'AffineTransport'.
+// Any other surface label (support surfaces, constraint
+// visualizations) is ignored here. The nominal layer additionally
+// feeds the control cage, weights heatmap, and split-seam isoparm
+// curves.
 //
 // Groups (all live under this.scene):
-//   - skeletonShadow   : persistent Profiles / Spine / Guides (provided
-//                        by main.js via options.skeletonGroup; rendered
-//                        at lower opacity as a faint reference
-//                        background).
-//   - manifoldGroup    : the pre-split theoretical NURBS surface sampled
-//                        via THREE.NURBSSurface (40×40 grid). Hidden
-//                        when the case carries no stage4 envelope.
-//   - patchesGroup     : the post-split industrial patches (one Mesh
-//                        per patch from options.patches). Per-patch
-//                        distinct colors when the 'distinct' layer is
-//                        on, single default color otherwise.
-//   - cageGroup        : Line2 row/col polylines + sphere-per-CP for
-//                        the theoretical manifold's control polygon.
-//   - seamsGroup       : Line2 isoparm curves for split_u_params +
-//                        split_v_params, color 0xff8800.
+//   - skeletonShadow        : persistent Profiles / Spine / Guides
+//                             (provided by main.js via
+//                             options.skeletonGroup; rendered at lower
+//                             opacity as a faint reference background).
+//   - resultGroups[kind]    : one Group per RESULT_KINDS entry holding
+//                             the sampled NURBS meshes for that kind
+//                             (40×40 grid), tinted RESULT_COLORS[kind]
+//                             and faded to RESULT_OPACITY[kind].
+//   - cageGroup             : Line2 row/col polylines + sphere-per-CP
+//                             for the nominal manifold's control
+//                             polygon.
+//   - seamsGroup            : Line2 isoparm curves for split_u_params
+//                             + split_v_params, color 0xff8800.
 //
 // All dimensions derive from a manual bbox traversal over the
-// skeleton / manifold / patches / cage groups — same approach as
+// skeleton / result / cage / seams groups — same approach as
 // SpineFramesPanel. Scale invariance via L_ref = clamp(bbox.diag *
 // 0.018, 0.005, 5.0).
 
@@ -33,13 +38,21 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { NURBSSurface } from 'three/addons/curves/NURBSSurface.js';
 
-const COLOR_MANIFOLD = 0x4488aa;
+const RESULT_KINDS = ['NominalManifold', 'FreeBlend3D', 'AffineTransport'];
+const RESULT_COLORS = {
+    NominalManifold: 0x00ff88,
+    FreeBlend3D: 0xffaa00,
+    AffineTransport: 0x00aaff,
+};
+const RESULT_OPACITY = {
+    NominalManifold: 0.35,
+    FreeBlend3D: 0.7,
+    AffineTransport: 0.7,
+};
 const COLOR_PATCH_DEFAULT = 0xffaa00;
 const COLOR_CAGE_LINE = 0x666666;
 const COLOR_CAGE_SPHERE = 0x444444;
 const COLOR_SEAM = 0xff8800;
-const PIECE_PALETTE = [0xffaa00, 0x00aaff, 0x00ff88, 0xff5500, 0xaa00ff, 0x00ffaa,
-    0xff66cc, 0x66ccff, 0xccff66, 0xff3366, 0x9966ff, 0x33cc99];
 
 const SAMPLES_U = 40;
 const SAMPLES_V = 40;
@@ -54,9 +67,9 @@ export class ManifoldPatchesPanel {
      * @param {Object|null} caseData  — parsed case JSON.
      * @param {Object} options        — {
      *                                    skeletonGroup,
-     *                                    patches,            // optional
-     *                                    geometryParser,
-     *                                    initialBlend       // 0..1
+     *                                    patches,   // optional fallback
+     *                                               // when no parser
+     *                                    geometryParser
      *                                  }
      */
     constructor(container, caseData, options = {}) {
@@ -70,14 +83,16 @@ export class ManifoldPatchesPanel {
         this._running = false;
         this._rafId = null;
 
-        this._blend = (typeof this.options.initialBlend === 'number')
-            ? Math.max(0, Math.min(1, this.options.initialBlend))
-            : 0.5;
         this._layerVisible = {
             cage: true,
             weights: false,
             seams: true,
             distinct: true,
+        };
+        this._resultVisible = {
+            NominalManifold: true,
+            FreeBlend3D: true,
+            AffineTransport: true,
         };
         this._weightStats = { w_min: 0, w_max: 1 };
 
@@ -88,13 +103,15 @@ export class ManifoldPatchesPanel {
         this.lightsGroup = null;
 
         this.skeletonShadow = null;
-        this.manifoldGroup = null;
-        this.patchesGroup = null;
+        this.resultGroups = null;
         this.cageGroup = null;
         this.seamsGroup = null;
 
-        this._manifoldMesh = null;
-        this._patchMeshes = [];
+        this._resultMeshes = {
+            NominalManifold: [],
+            FreeBlend3D: [],
+            AffineTransport: [],
+        };
         this._cageLines = [];
         this._cageSpheres = [];
         this._seamLines = [];
@@ -147,15 +164,17 @@ export class ManifoldPatchesPanel {
         this._lineMaterials = [];
     }
 
-    setBlend(t) {
-        const v = Number.isFinite(t) ? Math.max(0, Math.min(1, t)) : 0.5;
-        this._blend = v;
-        if (this._manifoldMesh && this._manifoldMesh.material) {
-            this._manifoldMesh.material.opacity = 1 - v;
-        }
-        for (const m of this._patchMeshes) {
-            if (m && m.material) m.material.opacity = v;
-        }
+    /**
+     * Show/hide one result layer. Safe to call before _applyData —
+     * the per-kind groups are created in _initThree, so an unknown
+     * kind is rejected and a missing group degrades to bookkeeping
+     * only.
+     */
+    setResultVisible(kind, visible) {
+        if (!(kind in this._resultVisible)) return;
+        this._resultVisible[kind] = !!visible;
+        const group = this.resultGroups ? this.resultGroups[kind] : null;
+        if (group) group.visible = !!visible;
     }
 
     setLayerVisible(name, visible) {
@@ -168,14 +187,20 @@ export class ManifoldPatchesPanel {
         } else if (name === 'weights') {
             this._applyCageSphereColors();
         } else if (name === 'distinct') {
-            this._applyPatchColors();
+            this._applyResultColors();
         }
     }
 
-    getBlend() { return this._blend; }
     getWeightStats() { return { ...this._weightStats }; }
     getLayerVisible() { return { ...this._layerVisible }; }
-    getPatchCount() { return this._patchMeshes.length; }
+    getResultVisible() { return { ...this._resultVisible }; }
+    getResultCounts() {
+        const counts = {};
+        for (const kind of RESULT_KINDS) {
+            counts[kind] = (this._resultMeshes[kind] || []).length;
+        }
+        return counts;
+    }
 
     // ---- DOM scaffolding -------------------------------------------------
 
@@ -246,13 +271,13 @@ export class ManifoldPatchesPanel {
         this.lightsGroup.add(dir);
         this.scene.add(this.lightsGroup);
 
-        this.manifoldGroup = new THREE.Group();
-        this.manifoldGroup.name = 'manifoldPatches.manifold';
-        this.scene.add(this.manifoldGroup);
-
-        this.patchesGroup = new THREE.Group();
-        this.patchesGroup.name = 'manifoldPatches.patches';
-        this.scene.add(this.patchesGroup);
+        this.resultGroups = {};
+        for (const kind of RESULT_KINDS) {
+            const group = new THREE.Group();
+            group.name = `manifoldPatches.result.${kind}`;
+            this.resultGroups[kind] = group;
+            this.scene.add(group);
+        }
 
         this.cageGroup = new THREE.Group();
         this.cageGroup.name = 'manifoldPatches.cage';
@@ -273,6 +298,12 @@ export class ManifoldPatchesPanel {
     _applyLayerGroupVisibility() {
         if (this.cageGroup) this.cageGroup.visible = this._layerVisible.cage;
         if (this.seamsGroup) this.seamsGroup.visible = this._layerVisible.seams;
+        if (this.resultGroups) {
+            for (const kind of RESULT_KINDS) {
+                const group = this.resultGroups[kind];
+                if (group) group.visible = this._resultVisible[kind];
+            }
+        }
     }
 
     _wireResize() {
@@ -301,13 +332,40 @@ export class ManifoldPatchesPanel {
 
     // ---- data extraction -------------------------------------------------
 
-    _extractManifold(caseData) {
-        if (!this._parser || typeof this._parser.parseDebug !== 'function') return null;
-        let dbg = null;
-        try { dbg = this._parser.parseDebug(caseData); }
-        catch (e) { return null; }
-        if (!dbg) return null;
-        return dbg.stage4_theoretical_manifold || null;
+    /**
+     * Resolve the surface descriptors this panel renders. Prefers
+     * GeometryParser.parseNurbs(caseData).surfaces — the parser already
+     * synthesizes the §3.2 NominalManifold entry from
+     * intermediate_products.s_norm_cp. Falls back to options.patches
+     * when no parser is available or parsing throws.
+     */
+    _extractSurfaces(caseData) {
+        if (!caseData) return [];
+        if (this._parser && typeof this._parser.parseNurbs === 'function') {
+            try {
+                const parsed = this._parser.parseNurbs(caseData);
+                if (parsed && Array.isArray(parsed.surfaces)) return parsed.surfaces;
+            } catch (e) {
+                /* malformed envelope → use options.patches below */
+            }
+        }
+        return Array.isArray(this._patches) ? this._patches : [];
+    }
+
+    /**
+     * Partition parsed surfaces into the three RESULT_KINDS buckets.
+     * Descriptors carrying any other label (support surfaces,
+     * constraint visualizations, ...) are ignored — Tab 5 renders
+     * result layers only.
+     */
+    _partitionSurfaces(caseData) {
+        const byKind = { NominalManifold: [], FreeBlend3D: [], AffineTransport: [] };
+        for (const s of this._extractSurfaces(caseData)) {
+            if (!s || typeof s.label !== 'string') continue;
+            if (!(s.label in byKind)) continue;
+            byKind[s.label].push(s);
+        }
+        return byKind;
     }
 
     // ---- skeleton (persistent reference background) ----------------------
@@ -346,34 +404,55 @@ export class ManifoldPatchesPanel {
 
     _applyData(caseData) {
         this._clearVizGroups();
-        const env = this._extractManifold(caseData);
-        const surface = env && env.surface;
-        const splitU = (env && Array.isArray(env.split_u_params)) ? env.split_u_params : [];
-        const splitV = (env && Array.isArray(env.split_v_params)) ? env.split_v_params : [];
-        if (surface && surface.num_cps_u > 0 && surface.num_cps_v > 0
-            && Array.isArray(surface.control_points)
-            && surface.control_points.length === surface.num_cps_u * surface.num_cps_v
-            && Array.isArray(surface.knots_u) && Array.isArray(surface.knots_v)) {
-            this._buildManifold(surface);
-            this._buildCage(surface);
-            this._buildSeams(surface, splitU, splitV);
-            this._computeWeightStats(surface);
+        const byKind = this._partitionSurfaces(caseData);
+
+        for (const kind of RESULT_KINDS) {
+            for (const desc of byKind[kind]) {
+                const mesh = this._buildResultMesh(desc, kind);
+                if (!mesh) continue;
+                this.resultGroups[kind].add(mesh);
+                this._resultMeshes[kind].push(mesh);
+            }
+        }
+
+        const stage4 = (caseData && caseData.debug
+            && caseData.debug.stage4_theoretical_manifold) || null;
+        const splitU = (stage4 && Array.isArray(stage4.split_u_params)) ? stage4.split_u_params : [];
+        const splitV = (stage4 && Array.isArray(stage4.split_v_params)) ? stage4.split_v_params : [];
+
+        // Cage / weights / seams all describe the nominal manifold, so
+        // they are skipped entirely when no NominalManifold surface is
+        // present in this case.
+        const nominal = byKind.NominalManifold[0] || null;
+        if (nominal) {
+            const normalized = this._normalizeSurfaceForCage(nominal);
+            if (normalized) {
+                this._buildCage(normalized);
+                this._computeWeightStats(normalized);
+                this._buildSeams(normalized, splitU, splitV);
+            }
         } else {
             this._weightStats = { w_min: 0, w_max: 1 };
         }
-        this._buildPatches();
-        this._applyPatchColors();
+
+        this._applyResultColors();
         this._applyCageSphereColors();
-        this.setBlend(this._blend);
         this._applyLayerGroupVisibility();
         this._fitCameraToScene();
     }
 
-    _buildManifold(surface) {
-        const ns = this._makeNurbsSurface(surface);
-        if (!ns) return;
-        const uS = this._buildSampleParams(surface.knots_u, surface.degree_u, SAMPLES_U);
-        const vS = this._buildSampleParams(surface.knots_v, surface.degree_v, SAMPLES_V);
+    /**
+     * Sample one surface descriptor into a translucent result mesh.
+     * Accepts the same descriptor shapes as _buildNurbsFromPatch
+     * (p_u/p_v or degreeU/degreeV, knots_u/v or knotsU/V,
+     * control_points flat or object arrays).
+     */
+    _buildResultMesh(surfaceDesc, kind) {
+        const ns = this._buildNurbsFromPatch(surfaceDesc);
+        if (!ns) return null;
+        const uS = this._buildSampleParams(ns._knotsU, ns._degreeU, SAMPLES_U);
+        const vS = this._buildSampleParams(ns._knotsV, ns._degreeV, SAMPLES_V);
+        if (uS.length < 2 || vS.length < 2) return null;
         const geom = new THREE.BufferGeometry();
         const verts = [];
         const uvs = [];
@@ -404,83 +483,32 @@ export class ManifoldPatchesPanel {
         geom.computeVertexNormals();
 
         const mat = new THREE.MeshStandardMaterial({
-            color: COLOR_MANIFOLD,
+            color: RESULT_COLORS[kind],
             side: THREE.DoubleSide,
             metalness: 0.1,
             roughness: 0.6,
             transparent: true,
-            opacity: 1 - this._blend,
+            opacity: RESULT_OPACITY[kind],
             depthWrite: false,
         });
         const mesh = new THREE.Mesh(geom, mat);
-        mesh.name = 'manifoldPatches.manifoldMesh';
-        this.manifoldGroup.add(mesh);
-        this._manifoldMesh = mesh;
+        mesh.name = `manifoldPatches.resultMesh.${kind}`;
+        mesh.userData = { kind, label: surfaceDesc.label || kind };
+        return mesh;
     }
 
-    _buildPatches() {
-        const patches = this._patches;
-        if (!patches || patches.length === 0) return;
-        for (let i = 0; i < patches.length; i++) {
-            const p = patches[i];
-            if (!p) continue;
-            const ns = this._buildNurbsFromPatch(p);
-            if (!ns) continue;
-            const uS = this._buildSampleParams(ns._knotsU, ns._degreeU, SAMPLES_U);
-            const vS = this._buildSampleParams(ns._knotsV, ns._degreeV, SAMPLES_V);
-            const geom = new THREE.BufferGeometry();
-            const verts = [];
-            const uvs = [];
-            const target = new THREE.Vector3();
-            for (let j = 0; j < vS.length; j++) {
-                for (let k = 0; k < uS.length; k++) {
-                    ns.getPoint(uS[k], vS[j], target);
-                    if (!Number.isFinite(target.x) || !Number.isFinite(target.y) || !Number.isFinite(target.z)) {
-                        target.set(0, 0, 0);
-                    }
-                    verts.push(target.x, target.y, target.z);
-                    uvs.push(uS[k], vS[j]);
-                }
+    /**
+     * Recolor every result mesh according to the 'distinct' layer.
+     * ON  → RESULT_COLORS[kind]; OFF → COLOR_PATCH_DEFAULT for the two
+     * patch kinds while the nominal layer keeps its RESULT_COLORS tint.
+     */
+    _applyResultColors() {
+        for (const kind of RESULT_KINDS) {
+            for (const m of this._resultMeshes[kind] || []) {
+                if (!m || !m.material) continue;
+                const distinct = this._layerVisible.distinct || kind === 'NominalManifold';
+                m.material.color.setHex(distinct ? RESULT_COLORS[kind] : COLOR_PATCH_DEFAULT);
             }
-            const indices = [];
-            for (let j = 0; j < vS.length - 1; j++) {
-                for (let k = 0; k < uS.length - 1; k++) {
-                    const a = k + j * uS.length;
-                    const b = k + 1 + j * uS.length;
-                    const c = k + (j + 1) * uS.length;
-                    const d = k + 1 + (j + 1) * uS.length;
-                    indices.push(a, b, d, a, d, c);
-                }
-            }
-            geom.setIndex(indices);
-            geom.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
-            geom.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-            geom.computeVertexNormals();
-            const mat = new THREE.MeshStandardMaterial({
-                color: COLOR_PATCH_DEFAULT,
-                side: THREE.DoubleSide,
-                metalness: 0.1,
-                roughness: 0.6,
-                transparent: true,
-                opacity: this._blend,
-                depthWrite: false,
-            });
-            const mesh = new THREE.Mesh(geom, mat);
-            mesh.name = `manifoldPatches.patchMesh[${i}]`;
-            mesh.userData = { kind: 'patch', index: i, label: p.label || `patch_${i}` };
-            this.patchesGroup.add(mesh);
-            this._patchMeshes.push(mesh);
-        }
-    }
-
-    _applyPatchColors() {
-        for (let i = 0; i < this._patchMeshes.length; i++) {
-            const m = this._patchMeshes[i];
-            if (!m || !m.material) continue;
-            const color = this._layerVisible.distinct
-                ? PIECE_PALETTE[i % PIECE_PALETTE.length]
-                : COLOR_PATCH_DEFAULT;
-            m.material.color.setHex(color);
         }
     }
 
@@ -737,6 +765,85 @@ export class ManifoldPatchesPanel {
         return out;
     }
 
+    /**
+     * Normalize a parseNurbs-style surface descriptor into the
+     * stage4-style shape the cage / weights / seam helpers expect:
+     * control_points as [{x,y,z,w}] plus num_cps_u / num_cps_v (and
+     * degree_u / degree_v aliases). Flat control_points arrays (stride
+     * 3 or 4) are expanded into objects WITHOUT dividing by w — the
+     * existing helpers perform the homogeneous→euclidean division.
+     * Returns null when the descriptor lacks the knots/degree data
+     * needed to size the control grid.
+     */
+    _normalizeSurfaceForCage(surface) {
+        if (!surface || typeof surface !== 'object') return null;
+        const degreeU = (typeof surface.degree_u === 'number') ? surface.degree_u
+            : (typeof surface.p_u === 'number' ? surface.p_u : null);
+        const degreeV = (typeof surface.degree_v === 'number') ? surface.degree_v
+            : (typeof surface.p_v === 'number' ? surface.p_v : null);
+        const knotsU = Array.isArray(surface.knots_u) ? surface.knots_u
+            : (Array.isArray(surface.knotsU) ? surface.knotsU : null);
+        const knotsV = Array.isArray(surface.knots_v) ? surface.knots_v
+            : (Array.isArray(surface.knotsV) ? surface.knotsV : null);
+        const rawCps = Array.isArray(surface.control_points) ? surface.control_points : null;
+        if (degreeU === null || degreeV === null || !knotsU || !knotsV || !rawCps) return null;
+        const numU = (typeof surface.num_cps_u === 'number' && surface.num_cps_u > 0)
+            ? surface.num_cps_u : knotsU.length - degreeU - 1;
+        const numV = (typeof surface.num_cps_v === 'number' && surface.num_cps_v > 0)
+            ? surface.num_cps_v : knotsV.length - degreeV - 1;
+        const total = numU * numV;
+        if (numU < degreeU + 1 || numV < degreeV + 1 || total <= 0) return null;
+        const out = [];
+        if (rawCps.length > 0 && typeof rawCps[0] === 'object'
+            && rawCps[0] !== null && !Array.isArray(rawCps[0])) {
+            if (rawCps.length < total) return null;
+            for (let k = 0; k < total; k++) {
+                const cp = rawCps[k];
+                if (!cp || typeof cp !== 'object') return null;
+                out.push({
+                    x: (typeof cp.x === 'number') ? cp.x : 0,
+                    y: (typeof cp.y === 'number') ? cp.y : 0,
+                    z: (typeof cp.z === 'number') ? cp.z : 0,
+                    w: (typeof cp.w === 'number') ? cp.w : 1.0,
+                });
+            }
+        } else if (rawCps.length > 0 && Array.isArray(rawCps[0])) {
+            if (rawCps.length < total) return null;
+            for (let k = 0; k < total; k++) {
+                const cp = rawCps[k] || [];
+                out.push({
+                    x: (typeof cp[0] === 'number') ? cp[0] : 0,
+                    y: (typeof cp[1] === 'number') ? cp[1] : 0,
+                    z: (typeof cp[2] === 'number') ? cp[2] : 0,
+                    w: (typeof cp[3] === 'number') ? cp[3] : 1.0,
+                });
+            }
+        } else {
+            const stride = (rawCps.length >= total * 4) ? 4 : 3;
+            if (rawCps.length < total * stride) return null;
+            for (let k = 0; k < total; k++) {
+                const idx = k * stride;
+                out.push({
+                    x: (typeof rawCps[idx] === 'number') ? rawCps[idx] : 0,
+                    y: (typeof rawCps[idx + 1] === 'number') ? rawCps[idx + 1] : 0,
+                    z: (typeof rawCps[idx + 2] === 'number') ? rawCps[idx + 2] : 0,
+                    w: (stride === 4 && typeof rawCps[idx + 3] === 'number') ? rawCps[idx + 3] : 1.0,
+                });
+            }
+        }
+        return {
+            control_points: out,
+            num_cps_u: numU,
+            num_cps_v: numV,
+            knots_u: knotsU,
+            knots_v: knotsV,
+            degree_u: degreeU,
+            degree_v: degreeV,
+            p_u: degreeU,
+            p_v: degreeV,
+        };
+    }
+
     _computeWeightStats(surface) {
         const cps = surface.control_points;
         if (!Array.isArray(cps) || cps.length === 0) {
@@ -822,8 +929,9 @@ export class ManifoldPatchesPanel {
             });
         };
         collect(this.skeletonShadow);
-        collect(this.manifoldGroup);
-        collect(this.patchesGroup);
+        if (this.resultGroups) {
+            for (const kind of RESULT_KINDS) collect(this.resultGroups[kind]);
+        }
         collect(this.cageGroup);
         collect(this.seamsGroup);
         return bbox;
@@ -889,12 +997,14 @@ export class ManifoldPatchesPanel {
     // ---- disposal helpers ------------------------------------------------
 
     _clearVizGroups() {
-        this._clearGroup(this.manifoldGroup);
-        this._clearGroup(this.patchesGroup);
+        if (this.resultGroups) {
+            for (const kind of RESULT_KINDS) {
+                this._clearGroup(this.resultGroups[kind]);
+                this._resultMeshes[kind] = [];
+            }
+        }
         this._clearGroup(this.cageGroup);
         this._clearGroup(this.seamsGroup);
-        this._manifoldMesh = null;
-        this._patchMeshes = [];
         this._cageLines = [];
         this._cageSpheres = [];
         this._seamLines = [];

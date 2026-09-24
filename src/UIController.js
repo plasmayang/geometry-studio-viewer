@@ -608,11 +608,13 @@ export class UIController {
     /**
      * Build (lazily) the dedicated Tab 5 side panel: a Tweakpane
      * instance mounted inside #manifold-patches-side-panel, with a
-     * blend slider, four layer checkboxes (cage / weights / seams /
-     * distinct), a read-only w_min / w_max monitor, and a per-patch
-     * color chip list. The returned object exposes refresh(caseData),
-     * dispose(), setBlend(t), toggleLayer(name, visible), and
-     * resetBlend() so main.js can drive it from outside.
+     * Results folder holding one checkbox per result layer
+     * (NominalManifold / FreeBlend3D / AffineTransport), the four
+     * layer checkboxes (cage / weights / seams / distinct), a read-only
+     * w_min / w_max monitor for the nominal manifold, and a
+     * result-surface list. The returned object exposes
+     * refresh(caseData), dispose(), and toggleLayer(name, visible) so
+     * main.js can drive it from outside.
      */
     createManifoldPatchesPanel(container, callbacks) {
         if (!container) return null;
@@ -634,7 +636,9 @@ export class UIController {
         sidePanelRoot._tpInstance = sidePane;
 
         const params = {
-            blend: 0.5,
+            showNominalManifold: true,
+            showFreeBlend3D: true,
+            showAffineTransport: true,
             showCage: true,
             showWeights: false,
             showSeams: true,
@@ -642,20 +646,28 @@ export class UIController {
         };
         const weightMonitor = { w_min: 0, w_max: 1 };
 
-        const blendFolder = sidePane.addFolder({
-            title: 'Blend',
+        const resultsFolder = sidePane.addFolder({
+            title: 'Results',
             expanded: true,
         });
-        blendFolder.addBinding(params, 'blend', {
-            label: '0%=Manifold → 100%=Patches',
-            min: 0,
-            max: 1,
-            step: 0.01,
-        }).on('change', (ev) => {
-            if (callbacks && typeof callbacks.onBlendChange === 'function') {
-                callbacks.onBlendChange(ev.value);
-            }
-        });
+        resultsFolder.addBinding(params, 'showNominalManifold', { label: 'Nominal Manifold' })
+            .on('change', (ev) => {
+                if (callbacks && typeof callbacks.onResultToggle === 'function') {
+                    callbacks.onResultToggle('NominalManifold', ev.value);
+                }
+            });
+        resultsFolder.addBinding(params, 'showFreeBlend3D', { label: 'FreeBlend3D' })
+            .on('change', (ev) => {
+                if (callbacks && typeof callbacks.onResultToggle === 'function') {
+                    callbacks.onResultToggle('FreeBlend3D', ev.value);
+                }
+            });
+        resultsFolder.addBinding(params, 'showAffineTransport', { label: 'AffineTransport' })
+            .on('change', (ev) => {
+                if (callbacks && typeof callbacks.onResultToggle === 'function') {
+                    callbacks.onResultToggle('AffineTransport', ev.value);
+                }
+            });
 
         const layersFolder = sidePane.addFolder({
             title: 'Layers',
@@ -687,7 +699,7 @@ export class UIController {
             });
 
         const monitorFolder = sidePane.addFolder({
-            title: 'Weights (theoretical surface)',
+            title: 'Weights (nominal manifold)',
             expanded: true,
         });
         monitorFolder.addBinding(weightMonitor, 'w_min', {
@@ -697,39 +709,40 @@ export class UIController {
             label: 'w_max', readonly: true, format: (v) => v.toFixed(4),
         });
 
-        const patchListFolder = sidePane.addFolder({
-            title: 'Patches (distinct colors)',
+        const resultsListFolder = sidePane.addFolder({
+            title: 'Result Surfaces',
             expanded: true,
         });
-        const patchListBody = document.createElement('div');
-        patchListBody.className = 'manifold-patches-patch-list';
-        patchListFolder.element.appendChild(patchListBody);
+        const resultsListBody = document.createElement('div');
+        resultsListBody.className = 'manifold-patches-patch-list';
+        resultsListFolder.element.appendChild(resultsListBody);
 
-        const renderPatchList = (caseData) => {
-            patchListBody.innerHTML = '';
-            const patches = (caseData && caseData._manifoldPatchesRef
-                && Array.isArray(caseData._manifoldPatchesRef)) ? caseData._manifoldPatchesRef : [];
-            if (patches.length === 0) {
+        const renderResultsList = (caseData) => {
+            resultsListBody.innerHTML = '';
+            const entries = (caseData && Array.isArray(caseData._manifoldResultsRef))
+                ? caseData._manifoldResultsRef : [];
+            if (entries.length === 0) {
                 const empty = document.createElement('div');
                 empty.style.color = '#888';
-                empty.textContent = 'No post-split patches in case.nurbs.surfaces[]';
-                patchListBody.appendChild(empty);
+                empty.textContent = 'No result surfaces in case';
+                resultsListBody.appendChild(empty);
                 return;
             }
-            patches.forEach((p, i) => {
+            entries.forEach((entry) => {
                 const row = document.createElement('div');
                 row.className = 'manifold-patches-patch-row';
                 const swatch = document.createElement('span');
                 swatch.className = 'manifold-patches-patch-swatch';
-                const palette = [0xffaa00, 0x00aaff, 0x00ff88, 0xff5500, 0xaa00ff, 0x00ffaa,
-                    0xff66cc, 0x66ccff, 0xccff66, 0xff3366, 0x9966ff, 0x33cc99];
-                const hex = '#' + palette[i % palette.length].toString(16).padStart(6, '0');
-                swatch.style.backgroundColor = hex;
+                swatch.style.backgroundColor = entry.colorHex || '#999999';
                 const label = document.createElement('span');
-                label.textContent = p.label || `patch_${i}`;
+                label.textContent = entry.kind || entry.label || '?';
+                const count = document.createElement('span');
+                count.style.color = '#777';
+                count.textContent = `${entry.cpCount} cps`;
                 row.appendChild(swatch);
                 row.appendChild(label);
-                patchListBody.appendChild(row);
+                row.appendChild(count);
+                resultsListBody.appendChild(row);
             });
         };
 
@@ -746,25 +759,13 @@ export class UIController {
                     weightMonitor.w_max = 1;
                 }
                 sidePane.refresh();
-                renderPatchList(caseData);
-            },
-            setBlend(t) {
-                const v = (typeof t === 'number') ? Math.max(0, Math.min(1, t)) : 0.5;
-                params.blend = v;
-                sidePane.refresh();
+                renderResultsList(caseData);
             },
             toggleLayer(name, visible) {
                 if (name === 'cage') params.showCage = !!visible;
                 else if (name === 'weights') params.showWeights = !!visible;
                 else if (name === 'seams') params.showSeams = !!visible;
                 else if (name === 'distinct') params.showDistinct = !!visible;
-                sidePane.refresh();
-            },
-            resetBlend() {
-                params.blend = 0.5;
-                if (callbacks && typeof callbacks.onBlendChange === 'function') {
-                    callbacks.onBlendChange(0.5);
-                }
                 sidePane.refresh();
             },
             dispose() {

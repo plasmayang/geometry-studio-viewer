@@ -337,13 +337,12 @@ class App {
         if (!this.manifoldPatchesPanel) {
             const patchesRaw = (this.currentCaseData
                 && this.currentCaseData.surfaces) || [];
-            const patchesForBlend = Array.isArray(patchesRaw) ? patchesRaw : [];
             this.manifoldPatchesPanel = new ManifoldPatchesPanel(
                 container,
                 this.currentCaseData,
                 {
                     skeletonGroup: this.couplingSceneGroup,
-                    patches: patchesForBlend,
+                    patches: Array.isArray(patchesRaw) ? patchesRaw : [],
                     geometryParser: GeometryParser,
                 }
             );
@@ -353,10 +352,10 @@ class App {
         if (!this.manifoldPatchesSidePanel && this.ui
             && typeof this.ui.createManifoldPatchesPanel === 'function') {
             this.manifoldPatchesSidePanel = this.ui.createManifoldPatchesPanel(container, {
-                onBlendChange: (t) => {
+                onResultToggle: (kind, visible) => {
                     if (this.manifoldPatchesPanel
-                        && typeof this.manifoldPatchesPanel.setBlend === 'function') {
-                        this.manifoldPatchesPanel.setBlend(t);
+                        && typeof this.manifoldPatchesPanel.setResultVisible === 'function') {
+                        this.manifoldPatchesPanel.setResultVisible(kind, visible);
                     }
                 },
                 onLayerToggle: (name, visible) => {
@@ -370,30 +369,80 @@ class App {
         if (this.manifoldPatchesSidePanel && this.currentCaseData) {
             const cd = this.currentCaseData;
             const enriched = cd;
-            const patchesRef = (cd && Array.isArray(cd.surfaces)) ? cd.surfaces : [];
-            const dbg = (cd && cd.debug) || null;
-            const stage4 = (dbg && dbg.stage4_theoretical_manifold) || null;
-            const cps = (stage4 && stage4.surface
-                && Array.isArray(stage4.surface.control_points))
-                ? stage4.surface.control_points : [];
+            // Weight monitor source: the §3.2 nominal-flow control points
+            // (intermediate_products.s_norm_cp) are a FLAT array with
+            // stride 4 — w sits at indices 3, 7, 11, …
+            const sNorm = (cd.intermediate_products
+                && cd.intermediate_products.s_norm_cp) || null;
+            const nominalCps = (sNorm && Array.isArray(sNorm.control_points))
+                ? sNorm.control_points : [];
             let wMin = 0, wMax = 1;
-            if (cps.length > 0) {
+            if (nominalCps.length >= 4) {
                 wMin = Infinity; wMax = -Infinity;
-                for (const cp of cps) {
-                    if (!cp || typeof cp.w !== 'number') continue;
-                    if (cp.w < wMin) wMin = cp.w;
-                    if (cp.w > wMax) wMax = cp.w;
+                for (let i = 3; i < nominalCps.length; i += 4) {
+                    const w = nominalCps[i];
+                    if (typeof w !== 'number' || !Number.isFinite(w)) continue;
+                    if (w < wMin) wMin = w;
+                    if (w > wMax) wMax = w;
                 }
                 if (!Number.isFinite(wMin) || !Number.isFinite(wMax)) {
                     wMin = 0; wMax = 1;
                 }
             }
             enriched._manifoldWeightsRef = { w_min: wMin, w_max: wMax };
-            enriched._manifoldPatchesRef = patchesRef;
+
+            // Result-surface list: one row per parseNurbs surface whose
+            // label is one of the three tracked result kinds (the parser
+            // synthesizes NominalManifold from s_norm_cp).
+            const resultKinds = ['NominalManifold', 'FreeBlend3D', 'AffineTransport'];
+            const resultColorHex = {
+                NominalManifold: '#00ff88',
+                FreeBlend3D: '#ffaa00',
+                AffineTransport: '#00aaff',
+            };
+            const countControlPoints = (surface) => {
+                const cps = (surface && Array.isArray(surface.control_points))
+                    ? surface.control_points : [];
+                if (cps.length > 0 && typeof cps[0] === 'object' && cps[0] !== null
+                    && !Array.isArray(cps[0])) {
+                    return cps.length;
+                }
+                if (cps.length > 0 && Array.isArray(cps[0])) {
+                    return cps.length;
+                }
+                if (cps.length >= 4 && cps.length % 4 === 0) {
+                    return cps.length / 4;
+                }
+                return cps.length;
+            };
+            let parsedSurfaces = [];
+            try {
+                const parsedNurbs = GeometryParser.parseNurbs(cd);
+                if (parsedNurbs && Array.isArray(parsedNurbs.surfaces)) {
+                    parsedSurfaces = parsedNurbs.surfaces;
+                }
+            } catch (e) {
+                parsedSurfaces = [];
+            }
+            const resultsRef = [];
+            for (const kind of resultKinds) {
+                for (const s of parsedSurfaces) {
+                    if (!s || s.label !== kind) continue;
+                    resultsRef.push({
+                        kind,
+                        label: s.label,
+                        cpCount: countControlPoints(s),
+                        colorHex: resultColorHex[kind],
+                    });
+                }
+            }
+            enriched._manifoldResultsRef = resultsRef;
+
             this.manifoldPatchesSidePanel.refresh(enriched);
         }
-        // Output surfaces are hidden on Tab 5 — the panel owns the
-        // pre-split manifold + post-split patches via its own pipeline.
+        // Output surfaces are hidden on Tab 5 — the panel owns the three
+        // §3.2 result layers (NominalManifold / FreeBlend3D /
+        // AffineTransport) via its own pipeline.
         if (this.viewer && typeof this.viewer.hideSurfaces === 'function') {
             this.viewer.hideSurfaces();
         }
