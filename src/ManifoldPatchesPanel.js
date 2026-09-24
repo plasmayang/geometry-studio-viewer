@@ -10,9 +10,12 @@
 //   - FreeBlend3D      ← case.surfaces[] entry labelled 'FreeBlend3D'.
 //   - AffineTransport  ← case.surfaces[] entry labelled 'AffineTransport'.
 // Any other surface label (support surfaces, constraint
-// visualizations) is ignored here. The nominal layer additionally
-// feeds the control cage, weights heatmap, and split-seam isoparm
-// curves.
+// visualizations) is ignored here. Every rendered result surface
+// additionally gets its own control-point grid (control net: one row
+// and one column polyline set through that surface's control points).
+// Grids are grouped per result kind and toggled independently through
+// the 'cage:<kind>' layer keys; the nominal layer alone feeds the
+// weights heatmap and split-seam isoparm curves.
 //
 // Groups (all live under this.scene):
 //   - skeletonShadow        : persistent Profiles / Spine / Guides
@@ -23,10 +26,14 @@
 //                             the sampled NURBS meshes for that kind
 //                             (40×40 grid), tinted RESULT_COLORS[kind]
 //                             and faded to RESULT_OPACITY[kind].
-//   - cageGroup             : Line2 row/col polylines + sphere-per-CP
-//                             for the nominal manifold's control
-//                             polygon.
-//   - seamsGroup            : Line2 isoparm curves for split_u_params
+//   - cageGroup             : parent Group holding one cageGroups[kind]
+//                             child per RESULT_KINDS entry.
+//   - cageGroups[kind]      : that kind's row/col control-net polylines
+//                             for every rendered surface of the kind,
+//                             tinted RESULT_COLORS[kind] (no per-CP
+//                             sphere markers); toggled by the
+//                             'cage:<kind>' layer key.
+//   - seamsGroup            : isoparm curves for split_u_params
 //                             + split_v_params, color 0xff8800.
 //
 // All dimensions derive from a manual bbox traversal over the
@@ -50,9 +57,11 @@ const RESULT_OPACITY = {
     AffineTransport: 0.7,
 };
 const COLOR_PATCH_DEFAULT = 0xffaa00;
-const COLOR_CAGE_LINE = 0x666666;
-const COLOR_CAGE_SPHERE = 0x444444;
 const COLOR_SEAM = 0xff8800;
+const CAGE_LINE_OPACITY = 0.45;
+const CAGE_LAYER_PREFIX = 'cage:';
+
+const cageLayerKey = (kind) => `${CAGE_LAYER_PREFIX}${kind}`;
 
 const SAMPLES_U = 40;
 const SAMPLES_V = 40;
@@ -84,7 +93,9 @@ export class ManifoldPatchesPanel {
         this._rafId = null;
 
         this._layerVisible = {
-            cage: true,
+            [cageLayerKey('NominalManifold')]: true,
+            [cageLayerKey('FreeBlend3D')]: true,
+            [cageLayerKey('AffineTransport')]: true,
             weights: false,
             seams: true,
             distinct: true,
@@ -105,6 +116,7 @@ export class ManifoldPatchesPanel {
         this.skeletonShadow = null;
         this.resultGroups = null;
         this.cageGroup = null;
+        this.cageGroups = null;
         this.seamsGroup = null;
 
         this._resultMeshes = {
@@ -113,7 +125,6 @@ export class ManifoldPatchesPanel {
             AffineTransport: [],
         };
         this._cageLines = [];
-        this._cageSpheres = [];
         this._seamLines = [];
         this._lineMaterials = [];
 
@@ -180,12 +191,14 @@ export class ManifoldPatchesPanel {
     setLayerVisible(name, visible) {
         if (!(name in this._layerVisible)) return;
         this._layerVisible[name] = !!visible;
-        if (name === 'cage' && this.cageGroup) {
-            this.cageGroup.visible = !!visible;
+        if (name.startsWith(CAGE_LAYER_PREFIX)) {
+            const kind = name.slice(CAGE_LAYER_PREFIX.length);
+            const group = this.cageGroups ? this.cageGroups[kind] : null;
+            if (group) group.visible = !!visible;
         } else if (name === 'seams' && this.seamsGroup) {
             this.seamsGroup.visible = !!visible;
         } else if (name === 'weights') {
-            this._applyCageSphereColors();
+            this._applyCageColors();
         } else if (name === 'distinct') {
             this._applyResultColors();
         }
@@ -283,6 +296,14 @@ export class ManifoldPatchesPanel {
         this.cageGroup.name = 'manifoldPatches.cage';
         this.scene.add(this.cageGroup);
 
+        this.cageGroups = {};
+        for (const kind of RESULT_KINDS) {
+            const group = new THREE.Group();
+            group.name = `manifoldPatches.cage.${kind}`;
+            this.cageGroups[kind] = group;
+            this.cageGroup.add(group);
+        }
+
         this.seamsGroup = new THREE.Group();
         this.seamsGroup.name = 'manifoldPatches.seams';
         this.scene.add(this.seamsGroup);
@@ -296,7 +317,12 @@ export class ManifoldPatchesPanel {
     }
 
     _applyLayerGroupVisibility() {
-        if (this.cageGroup) this.cageGroup.visible = this._layerVisible.cage;
+        if (this.cageGroups) {
+            for (const kind of RESULT_KINDS) {
+                const group = this.cageGroups[kind];
+                if (group) group.visible = !!this._layerVisible[cageLayerKey(kind)];
+            }
+        }
         if (this.seamsGroup) this.seamsGroup.visible = this._layerVisible.seams;
         if (this.resultGroups) {
             for (const kind of RESULT_KINDS) {
@@ -420,14 +446,19 @@ export class ManifoldPatchesPanel {
         const splitU = (stage4 && Array.isArray(stage4.split_u_params)) ? stage4.split_u_params : [];
         const splitV = (stage4 && Array.isArray(stage4.split_v_params)) ? stage4.split_v_params : [];
 
-        // Cage / weights / seams all describe the nominal manifold, so
-        // they are skipped entirely when no NominalManifold surface is
-        // present in this case.
+        for (const kind of RESULT_KINDS) {
+            for (const desc of byKind[kind]) {
+                const normalized = this._normalizeSurfaceForCage(desc);
+                if (normalized) this._buildControlGrid(normalized, kind);
+            }
+        }
+
+        // Weights + seams describe the nominal manifold only; without a
+        // nominal surface the stats reset and the seams stay empty.
         const nominal = byKind.NominalManifold[0] || null;
         if (nominal) {
             const normalized = this._normalizeSurfaceForCage(nominal);
             if (normalized) {
-                this._buildCage(normalized);
                 this._computeWeightStats(normalized);
                 this._buildSeams(normalized, splitU, splitV);
             }
@@ -436,7 +467,7 @@ export class ManifoldPatchesPanel {
         }
 
         this._applyResultColors();
-        this._applyCageSphereColors();
+        this._applyCageColors();
         this._applyLayerGroupVisibility();
         this._fitCameraToScene();
     }
@@ -512,64 +543,82 @@ export class ManifoldPatchesPanel {
         }
     }
 
-    _buildCage(surface) {
+    /**
+     * Build one control net — num_cps_v row polylines plus num_cps_u
+     * column polylines through the surface's control points — tinted
+     * RESULT_COLORS[kind]. Vertex colors stay white by default so the
+     * material tint shows through; the weights layer swaps them for a
+     * per-CP heatmap (see _applyCageColors).
+     */
+    _buildControlGrid(surface, kind) {
+        const gridGroup = this.cageGroups ? this.cageGroups[kind] : null;
+        if (!gridGroup) return;
         const cps = this._collectControlPoints(surface);
         if (cps.length === 0) return;
         const numU = surface.num_cps_u;
         const numV = surface.num_cps_v;
-        const lineMat = new THREE.LineBasicMaterial({
-            color: COLOR_CAGE_LINE,
-            transparent: true,
-            opacity: 0.4,
-        });
-        for (let j = 0; j < numV; j++) {
-            const pts = [];
-            for (let i = 0; i < numU; i++) {
-                const cp = cps[j * numU + i];
-                if (!cp) continue;
-                pts.push(new THREE.Vector3(cp.x, cp.y, cp.z));
-            }
-            if (pts.length >= 2) {
-                const line = new THREE.Line(
-                    new THREE.BufferGeometry().setFromPoints(pts),
-                    lineMat,
-                );
-                this.cageGroup.add(line);
-                this._cageLines.push(line);
-            }
+        if (!(numU > 0) || !(numV > 0)) return;
+
+        let wMin = Infinity;
+        let wMax = -Infinity;
+        for (const cp of cps) {
+            if (typeof cp.w !== 'number' || !Number.isFinite(cp.w)) continue;
+            if (cp.w < wMin) wMin = cp.w;
+            if (cp.w > wMax) wMax = cp.w;
         }
-        for (let i = 0; i < numU; i++) {
-            const pts = [];
-            for (let j = 0; j < numV; j++) {
-                const cp = cps[j * numU + i];
-                if (!cp) continue;
-                pts.push(new THREE.Vector3(cp.x, cp.y, cp.z));
-            }
-            if (pts.length >= 2) {
-                const line = new THREE.Line(
-                    new THREE.BufferGeometry().setFromPoints(pts),
-                    lineMat,
-                );
-                this.cageGroup.add(line);
-                this._cageLines.push(line);
-            }
+        if (!Number.isFinite(wMin) || !Number.isFinite(wMax)) {
+            wMin = 0;
+            wMax = 1;
         }
 
-        const lDiag = this._computeDiag();
-        const sphereRadius = Math.max(0.001, 0.008 * Math.max(0.01, lDiag));
-        const sphereGeom = new THREE.SphereGeometry(sphereRadius, 8, 6);
-        for (let k = 0; k < cps.length; k++) {
-            const cp = cps[k];
-            const mat = new THREE.MeshStandardMaterial({
-                color: COLOR_CAGE_SPHERE,
-                transparent: true,
-                opacity: 0.9,
-            });
-            const mesh = new THREE.Mesh(sphereGeom, mat);
-            mesh.position.set(cp.x, cp.y, cp.z);
-            mesh.userData = { kind: 'cp_sphere', index: k, weight: cp.w };
-            this.cageGroup.add(mesh);
-            this._cageSpheres.push(mesh);
+        const lineMat = new THREE.LineBasicMaterial({
+            color: RESULT_COLORS[kind],
+            transparent: true,
+            opacity: CAGE_LINE_OPACITY,
+            depthWrite: false,
+            vertexColors: true,
+        });
+
+        const addPolyline = (cpsOnLine) => {
+            if (cpsOnLine.length < 2) return;
+            const count = cpsOnLine.length;
+            const positions = new Float32Array(count * 3);
+            const colors = new Float32Array(count * 3);
+            const weights = new Array(count);
+            for (let p = 0; p < count; p++) {
+                const cp = cpsOnLine[p];
+                positions[p * 3] = cp.x;
+                positions[p * 3 + 1] = cp.y;
+                positions[p * 3 + 2] = cp.z;
+                colors[p * 3] = 1;
+                colors[p * 3 + 1] = 1;
+                colors[p * 3 + 2] = 1;
+                weights[p] = cp.w;
+            }
+            const geom = new THREE.BufferGeometry();
+            geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            const line = new THREE.Line(geom, lineMat);
+            line.userData = { kind, weights, w_min: wMin, w_max: wMax };
+            gridGroup.add(line);
+            this._cageLines.push(line);
+        };
+
+        for (let j = 0; j < numV; j++) {
+            const row = [];
+            for (let i = 0; i < numU; i++) {
+                const cp = cps[j * numU + i];
+                if (cp) row.push(cp);
+            }
+            addPolyline(row);
+        }
+        for (let i = 0; i < numU; i++) {
+            const col = [];
+            for (let j = 0; j < numV; j++) {
+                const cp = cps[j * numU + i];
+                if (cp) col.push(cp);
+            }
+            addPolyline(col);
         }
     }
 
@@ -767,7 +816,8 @@ export class ManifoldPatchesPanel {
 
     /**
      * Normalize a parseNurbs-style surface descriptor into the
-     * stage4-style shape the cage / weights / seam helpers expect:
+     * stage4-style shape the control-grid / weights / seam helpers
+     * expect:
      * control_points as [{x,y,z,w}] plus num_cps_u / num_cps_v (and
      * degree_u / degree_v aliases). Flat control_points arrays (stride
      * 3 or 4) are expanded into objects WITHOUT dividing by w — the
@@ -864,19 +914,41 @@ export class ManifoldPatchesPanel {
         this._weightStats = { w_min: wMin, w_max: wMax };
     }
 
-    _applyCageSphereColors() {
-        const stats = this._weightStats;
-        const range = Math.max(1e-9, stats.w_max - stats.w_min);
-        for (const m of this._cageSpheres) {
-            if (!m || !m.material) continue;
-            const w = (m.userData && typeof m.userData.weight === 'number')
-                ? m.userData.weight : 1.0;
-            if (this._layerVisible.weights) {
-                const t = Math.max(0, Math.min(1, (w - stats.w_min) / range));
-                const c = this._rainbowHeatmap(t);
-                m.material.color.setHex(c);
+    /**
+     * Recolor the control nets according to the 'weights' layer. ON →
+     * per-vertex rainbow heatmap of each CP's homogeneous weight (scaled
+     * by that surface's own w range); OFF → white vertex colors so each
+     * net shows its RESULT_COLORS[kind] material tint.
+     */
+    _applyCageColors() {
+        const weightsOn = !!this._layerVisible.weights;
+        for (const line of this._cageLines) {
+            if (!line || !line.geometry || !line.material) continue;
+            const ud = line.userData || {};
+            const colorAttr = line.geometry.getAttribute('color');
+            if (weightsOn) {
+                line.material.color.setHex(0xffffff);
+                if (!colorAttr) continue;
+                const arr = colorAttr.array;
+                const weights = Array.isArray(ud.weights) ? ud.weights : [];
+                const wMin = (typeof ud.w_min === 'number') ? ud.w_min : 0;
+                const wMax = (typeof ud.w_max === 'number') ? ud.w_max : 1;
+                const range = Math.max(1e-9, wMax - wMin);
+                for (let p = 0; p < arr.length / 3; p++) {
+                    const w = (typeof weights[p] === 'number') ? weights[p] : 1.0;
+                    const t = Math.max(0, Math.min(1, (w - wMin) / range));
+                    const c = this._rainbowHeatmap(t);
+                    arr[p * 3] = ((c >> 16) & 0xff) / 255;
+                    arr[p * 3 + 1] = ((c >> 8) & 0xff) / 255;
+                    arr[p * 3 + 2] = (c & 0xff) / 255;
+                }
+                colorAttr.needsUpdate = true;
             } else {
-                m.material.color.setHex(COLOR_CAGE_SPHERE);
+                line.material.color.setHex(RESULT_COLORS[ud.kind] || COLOR_PATCH_DEFAULT);
+                if (!colorAttr) continue;
+                const arr = colorAttr.array;
+                for (let p = 0; p < arr.length; p++) arr[p] = 1;
+                colorAttr.needsUpdate = true;
             }
         }
     }
@@ -932,7 +1004,9 @@ export class ManifoldPatchesPanel {
         if (this.resultGroups) {
             for (const kind of RESULT_KINDS) collect(this.resultGroups[kind]);
         }
-        collect(this.cageGroup);
+        if (this.cageGroups) {
+            for (const kind of RESULT_KINDS) collect(this.cageGroups[kind]);
+        }
         collect(this.seamsGroup);
         return bbox;
     }
@@ -1003,10 +1077,11 @@ export class ManifoldPatchesPanel {
                 this._resultMeshes[kind] = [];
             }
         }
-        this._clearGroup(this.cageGroup);
+        if (this.cageGroups) {
+            for (const kind of RESULT_KINDS) this._clearGroup(this.cageGroups[kind]);
+        }
         this._clearGroup(this.seamsGroup);
         this._cageLines = [];
-        this._cageSpheres = [];
         this._seamLines = [];
         for (const m of this._lineMaterials) {
             try { m.dispose(); } catch (e) { /* no-op */ }

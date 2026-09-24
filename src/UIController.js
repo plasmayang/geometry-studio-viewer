@@ -609,8 +609,9 @@ export class UIController {
      * Build (lazily) the dedicated Tab 5 side panel: a Tweakpane
      * instance mounted inside #manifold-patches-side-panel, with a
      * Results folder holding one checkbox per result layer
-     * (NominalManifold / FreeBlend3D / AffineTransport), the four
-     * layer checkboxes (cage / weights / seams / distinct), a read-only
+     * (NominalManifold / FreeBlend3D / AffineTransport), a Control
+     * Point Grids folder holding one per-kind grid checkbox, the
+     * weights / seams / distinct layer checkboxes, a read-only
      * w_min / w_max monitor for the nominal manifold, and a
      * result-surface list. The returned object exposes
      * refresh(caseData), dispose(), and toggleLayer(name, visible) so
@@ -639,11 +640,18 @@ export class UIController {
             showNominalManifold: true,
             showFreeBlend3D: true,
             showAffineTransport: true,
-            showCage: true,
+            showCageNominalManifold: true,
+            showCageFreeBlend3D: true,
+            showCageAffineTransport: true,
             showWeights: false,
             showSeams: true,
             showDistinct: true,
         };
+        const cageKinds = [
+            { kind: 'NominalManifold', label: 'Nominal Manifold', param: 'showCageNominalManifold' },
+            { kind: 'FreeBlend3D', label: 'FreeBlend3D', param: 'showCageFreeBlend3D' },
+            { kind: 'AffineTransport', label: 'AffineTransport', param: 'showCageAffineTransport' },
+        ];
         const weightMonitor = { w_min: 0, w_max: 1 };
 
         const resultsFolder = sidePane.addFolder({
@@ -673,12 +681,6 @@ export class UIController {
             title: 'Layers',
             expanded: true,
         });
-        layersFolder.addBinding(params, 'showCage', { label: 'Control Cage' })
-            .on('change', (ev) => {
-                if (callbacks && typeof callbacks.onLayerToggle === 'function') {
-                    callbacks.onLayerToggle('cage', ev.value);
-                }
-            });
         layersFolder.addBinding(params, 'showWeights', { label: 'Weights Heatmap' })
             .on('change', (ev) => {
                 if (callbacks && typeof callbacks.onLayerToggle === 'function') {
@@ -697,6 +699,19 @@ export class UIController {
                     callbacks.onLayerToggle('distinct', ev.value);
                 }
             });
+
+        const gridsFolder = sidePane.addFolder({
+            title: 'Control Point Grids',
+            expanded: true,
+        });
+        for (const entry of cageKinds) {
+            gridsFolder.addBinding(params, entry.param, { label: entry.label })
+                .on('change', (ev) => {
+                    if (callbacks && typeof callbacks.onLayerToggle === 'function') {
+                        callbacks.onLayerToggle(`cage:${entry.kind}`, ev.value);
+                    }
+                });
+        }
 
         const monitorFolder = sidePane.addFolder({
             title: 'Weights (nominal manifold)',
@@ -762,10 +777,14 @@ export class UIController {
                 renderResultsList(caseData);
             },
             toggleLayer(name, visible) {
-                if (name === 'cage') params.showCage = !!visible;
-                else if (name === 'weights') params.showWeights = !!visible;
+                if (name === 'weights') params.showWeights = !!visible;
                 else if (name === 'seams') params.showSeams = !!visible;
                 else if (name === 'distinct') params.showDistinct = !!visible;
+                else if (name.startsWith('cage:')) {
+                    const kind = name.slice('cage:'.length);
+                    const entry = cageKinds.find((c) => c.kind === kind);
+                    if (entry) params[entry.param] = !!visible;
+                }
                 sidePane.refresh();
             },
             dispose() {
